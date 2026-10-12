@@ -342,7 +342,7 @@ select.input {
 .chip input:checked + span { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
 .chip input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-.segmented { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; border-radius: 14px; background: var(--card-2); }
+.segmented { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 4px; padding: 4px; border-radius: 14px; background: var(--card-2); }
 .segmented label { position: relative; }
 .segmented input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; }
 .segmented span { display: block; padding: 10px; border-radius: 11px; text-align: center; font-weight: 700; color: var(--muted); }
@@ -372,11 +372,44 @@ select.input {
 .toast {
   position: fixed; z-index: 80; left: 50%;
   bottom: calc(var(--tabbar-h) + 24px + env(safe-area-inset-bottom));
-  max-width: calc(100% - 32px); transform: translate(-50%, 16px); opacity: 0;
+  width: max-content; max-width: calc(100% - 32px); transform: translate(-50%, 16px); opacity: 0;
   padding: 12px 18px; border-radius: 14px; background: var(--ink); color: var(--card);
   font-size: 15px; font-weight: 600; pointer-events: none; transition: opacity .2s, transform .2s;
 }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+/* =========================================================
+   6) 이체 · 계좌 상세 (v1.1)
+   ========================================================= */
+.row-amt.transfer { color: var(--ink-2); }
+.sumrow.xfer { font-size: 15px; }
+.sumrow.xfer .k, .sumrow.xfer .v { color: var(--ink-2); }
+.sumrow.xfer .v { font-weight: 600; }
+.swap-row { display: flex; justify-content: center; }
+.swap-btn {
+  display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line);
+  background: var(--card); color: var(--ink-2); border-radius: 999px; padding: 5px 14px; font-size: 14px; font-weight: 600;
+}
+.swap-btn svg { width: 18px; height: 18px; }
+.xfer-note { margin: 2px 0 0; padding: 10px 12px; border-radius: 12px; background: var(--accent-soft); color: var(--accent-ink); font-size: 14px; font-weight: 600; }
+.detail-type { display: flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 600; color: var(--ink-2); }
+.detail-bal { margin: 6px 0 2px; font-size: clamp(28px, 8vw, 34px); font-weight: 800; letter-spacing: -0.02em; line-height: 1.2; }
+.detail-sub { font-size: 14px; color: var(--ink-2); }
+.detail-actions { display: flex; gap: 8px; margin: 16px 0 4px; }
+.detail-actions .btn { flex: 1; }
+.sheet-section { margin: 20px 0 4px; font-size: 14px; font-weight: 700; color: var(--ink-2); }
+.history { list-style: none; margin: 0; padding: 0; }
+.history li { display: flex; align-items: center; gap: 12px; padding: 11px 0; border-top: 1px solid var(--line); }
+.history li:first-child { border-top: 0; }
+.h-main { flex: 1; min-width: 0; }
+.h-title, .h-sub { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.h-title { font-size: 15px; font-weight: 600; }
+.h-sub { font-size: 13px; color: var(--muted); margin-top: 1px; }
+.h-amt { flex: none; font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; text-align: right; }
+.h-amt.plus { color: var(--income); }
+.h-base .h-title { color: var(--ink-2); }
+.h-base .h-amt { color: var(--ink-2); font-weight: 600; }
+.sheet-end { height: 24px; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; animation: none !important; }
@@ -444,16 +477,17 @@ select.input {
 /* =========================================================
    0) 앱 정보 · 분류 목록  ← 분류 이름을 바꾸고 싶으면 여기를 고치세요
    ========================================================= */
-const APP_VERSION = '1.0.0';
-const STORAGE_KEY = 'myasset.v1';       // 휴대폰에 저장할 때 쓰는 이름
+const APP_VERSION = '1.1.0';
+const DATA_VERSION = 2;                 // 데이터 구조 버전 (v1.1부터 2: 이체 추가)
+const STORAGE_KEY = 'myasset.v1';       // 휴대폰에 저장할 때 쓰는 이름 (기존 데이터를 그대로 읽도록 유지)
 const MAX_AMOUNT = 1e15;                // 입력 가능한 최대 금액 (천조 원)
 
-// 자산 종류: color = 차트 색 번호, linkable = 가계부와 연결 가능 여부
+// 자산 종류: color = 차트 색 번호
 const ASSET_TYPES = [
-  { id: 'cash',       label: '현금·통장', kind: 'asset',     color: 1, linkable: true,
+  { id: 'cash',       label: '현금·통장', kind: 'asset',     color: 1,
     hint: '현금, 입출금통장, 파킹통장, CMA', ph: '예) 국민은행 월급통장, 지갑 현금', amountLabel: '현재 잔액' },
   { id: 'deposit',    label: '예금',      kind: 'asset',     color: 2,
-    hint: '정기예금', ph: '예) 신한 정기예금', amountLabel: '현재 금액' },
+    hint: '정기예금, 예금 통장', ph: '예) 신한 정기예금', amountLabel: '현재 금액' },
   { id: 'savings',    label: '적금',      kind: 'asset',     color: 3,
     hint: '정기·자유적금, 주택청약', ph: '예) 카카오뱅크 자유적금', amountLabel: '지금까지 모은 금액' },
   { id: 'invest',     label: '투자',      kind: 'asset',     color: 4,
@@ -461,8 +495,8 @@ const ASSET_TYPES = [
   { id: 'realestate', label: '부동산',    kind: 'asset',     color: 5,
     hint: '아파트·토지, 전·월세 보증금', ph: '예) 우리집 아파트, 전세보증금', amountLabel: '현재 시세 (또는 보증금)' },
   { id: 'other',      label: '기타 자산', kind: 'asset',     color: 6,
-    hint: '자동차, 빌려준 돈 등', ph: '예) 자동차, 빌려준 돈', amountLabel: '현재 가치' },
-  { id: 'loan',       label: '대출·부채', kind: 'liability', color: 8, linkable: true,
+    hint: '저축성 보험, 자동차, 빌려준 돈 등', ph: '예) 저축보험, 자동차, 빌려준 돈', amountLabel: '현재 금액 (또는 모은 금액)' },
+  { id: 'loan',       label: '대출·부채', kind: 'liability', color: 8,
     hint: '주택담보·전세·신용대출, 마이너스통장, 카드 결제 예정액', ph: '예) 전세자금대출, 마이너스통장', amountLabel: '남은 금액' },
 ];
 
@@ -490,6 +524,7 @@ const INCOME_CATS = [
   { id: 'allowance', label: '용돈',        icon: '💌' },
   { id: 'in_etc',    label: '기타 수입',   icon: '📌' },
 ];
+const KINDS = ['expense', 'income', 'transfer'];   // 지출 · 수입 · 이체
 
 const TYPE = Object.fromEntries(ASSET_TYPES.map(t => [t.id, t]));
 const CAT = Object.fromEntries([...EXPENSE_CATS, ...INCOME_CATS].map(c => [c.id, c]));
@@ -566,6 +601,16 @@ function formatMoneyInput(el) {
     try { el.setSelectionRange(s.length, s.length); } catch (e) { /* 일부 입력칸은 지원 안 함 */ }
   }
 }
+// 받침에 따라 '로/으로' 고르기: 적금 → "적금으로", 보험 → "보험으로", 통장 → "통장으로", 카드 → "카드로"
+function josaRo(word) {
+  const s = String(word || '').trim();
+  const c = s.charCodeAt(s.length - 1);
+  if (c >= 0xAC00 && c <= 0xD7A3) {
+    const jong = (c - 0xAC00) % 28;
+    return jong === 0 || jong === 8 ? '로' : '으로';   // 받침 없음 또는 ㄹ받침 → '로'
+  }
+  return '(으)로';
+}
 const WEEK = '일월화수목금토';
 function dateLabel(s) {
   const [y, m, d] = s.split('-').map(Number);
@@ -591,18 +636,23 @@ const isStandalone = () => matchMedia('(display-mode: standalone)').matches || n
    ---------------------------------------------------------
    assets: [{ id, type, name, memo, baseAmount, baseAt, createdAt, updatedAt }]
      · baseAmount = 마지막으로 직접 입력한 금액, baseAt = 그 시각
-   txs:    [{ id, kind('expense'|'income'), date('YYYY-MM-DD'), amount, category,
-              memo, accountId, createdAt, updatedAt, appliedAt }]
+   txs:    [{ id, kind('expense'|'income'|'transfer'), date('YYYY-MM-DD'), amount, category,
+              memo, accountId, toAccountId, createdAt, updatedAt, appliedAt, toAppliedAt }]
+     · 지출/수입: accountId = 돈이 나간/들어온 계좌
+     · 이체: accountId = 보내는 곳(−), toAccountId = 받는 곳(+)
    ========================================================= */
 function emptyState() {
-  return { version: 1, assets: [], txs: [], settings: { hideAmounts: false, lastAccount: { expense: '', income: '' }, lastBackupAt: 0 } };
+  return {
+    version: DATA_VERSION, assets: [], txs: [],
+    settings: { hideAmounts: false, lastAccount: { expense: '', income: '', transferFrom: '', transferTo: '' }, lastBackupAt: 0 },
+  };
 }
 
-// 저장된 값(또는 백업 파일)을 검사해서 올바른 모양으로 정리
+// 저장된 값(또는 백업 파일)을 검사해서 올바른 모양으로 정리 — v1(이체 없던 버전) 데이터도 그대로 읽음
 function normalize(raw) {
   const s = emptyState();
   if (!raw || typeof raw !== 'object') return s;
-  const num = (v, d = 0) => (Number.isFinite(Number(v)) ? Number(v) : d);
+  const num = (v, d = 0) => (v !== null && v !== '' && Number.isFinite(Number(v)) ? Number(v) : d);
   const str = (v, max) => (v == null ? '' : String(v)).slice(0, max);
   const ids = new Set();
   const uid = v => { let id = str(v, 64); if (!id || ids.has(id)) id = newId(); ids.add(id); return id; };
@@ -618,22 +668,34 @@ function normalize(raw) {
   }
   if (Array.isArray(raw.txs)) {
     for (const t of raw.txs) {
-      if (!t || (t.kind !== 'expense' && t.kind !== 'income')) continue;
+      if (!t || !KINDS.includes(t.kind)) continue;
       if (!/^\d{4}-\d{2}-\d{2}$/.test(String(t.date))) continue;
       const amount = Math.min(Math.round(num(t.amount)), MAX_AMOUNT);
       if (!(amount > 0)) continue;
-      const cats = catsOf(t.kind);
-      s.txs.push({
-        id: uid(t.id), kind: t.kind, date: t.date, amount,
-        category: cats.some(c => c.id === t.category) ? t.category : cats[cats.length - 1].id,
-        memo: str(t.memo, 200), accountId: str(t.accountId, 64),
-        createdAt: num(t.createdAt), updatedAt: num(t.updatedAt), appliedAt: num(t.appliedAt, num(t.createdAt)),
-      });
+      const tx = {
+        id: uid(t.id), kind: t.kind, date: t.date, amount, category: '', memo: str(t.memo, 200),
+        accountId: str(t.accountId, 64), toAccountId: '',
+        createdAt: num(t.createdAt), updatedAt: num(t.updatedAt),
+        appliedAt: num(t.appliedAt, num(t.createdAt)), toAppliedAt: 0,
+      };
+      if (t.kind === 'transfer') {
+        tx.category = 'transfer';
+        tx.toAccountId = str(t.toAccountId, 64);
+        tx.toAppliedAt = num(t.toAppliedAt, tx.appliedAt);
+      } else {
+        const cats = catsOf(t.kind);
+        tx.category = cats.some(c => c.id === t.category) ? t.category : cats[cats.length - 1].id;
+      }
+      s.txs.push(tx);
     }
   }
   const st = raw.settings || {};
+  const la = st.lastAccount || {};
   s.settings.hideAmounts = !!st.hideAmounts;
-  s.settings.lastAccount = { expense: str(st.lastAccount && st.lastAccount.expense, 64), income: str(st.lastAccount && st.lastAccount.income, 64) };
+  s.settings.lastAccount = {
+    expense: str(la.expense, 64), income: str(la.income, 64),
+    transferFrom: str(la.transferFrom, 64), transferTo: str(la.transferTo, 64),
+  };
   s.settings.lastBackupAt = num(st.lastBackupAt);
   return s;
 }
@@ -676,22 +738,33 @@ async function requestPersist() {
 /* =========================================================
    3) 계산 (잔액 · 합계)
    ---------------------------------------------------------
-   계좌 잔액 = 마지막으로 직접 입력한 금액
-             + 그 이후에 이 계좌로 기록한 수입 − 지출
-   (대출·부채는 반대: 지출하면 부채가 늘고, 들어오면 줄어듦)
+   자산 금액 = 마지막으로 직접 입력한 금액
+             + 그 이후 이 자산으로 기록한 (들어온 돈 − 나간 돈)
+   · 이체: 보내는 곳은 −, 받는 곳은 + (순자산은 그대로)
+   · 대출·부채는 반대: 그 부채로 결제하면 늘고, 이체로 갚으면 줄어듦
    ========================================================= */
-const isLiab = a => TYPE[a.type] && TYPE[a.type].kind === 'liability';
-const isLinkable = a => !!(TYPE[a.type] && TYPE[a.type].linkable);
+const isLiab = a => !!a && TYPE[a.type] && TYPE[a.type].kind === 'liability';
+const sideSign = a => (isLiab(a) ? -1 : 1);
+const assetById = id => (id ? state.assets.find(a => a.id === id) : null) || null;
+// 계좌 이름 (지워진 계좌면 '삭제된 계좌')
+const accName = id => { if (!id) return ''; const a = assetById(id); return a ? a.name : '삭제된 계좌'; };
 
-function balanceOf(a) {
-  let bal = a.baseAmount;
+// 이 자산의 금액을 바꾼 기록 목록: [{ t, delta(금액 변화), dir('in'|'out') }]
+function effectsOn(a) {
+  const out = [];
   for (const t of state.txs) {
-    if (t.accountId !== a.id || t.appliedAt <= a.baseAt) continue;
-    const flow = t.kind === 'income' ? t.amount : -t.amount;   // 계좌로 들어오면 +
-    bal += isLiab(a) ? -flow : flow;
+    if (t.kind === 'transfer') {
+      if (t.accountId === a.id && t.appliedAt > a.baseAt) out.push({ t, delta: -t.amount * sideSign(a), dir: 'out' });
+      if (t.toAccountId === a.id && t.toAppliedAt > a.baseAt) out.push({ t, delta: t.amount * sideSign(a), dir: 'in' });
+    } else if (t.accountId === a.id && t.appliedAt > a.baseAt) {
+      const flow = t.kind === 'income' ? t.amount : -t.amount;   // 계좌로 들어오면 +
+      out.push({ t, delta: flow * sideSign(a), dir: t.kind === 'income' ? 'in' : 'out' });
+    }
   }
-  return bal;
+  return out;
 }
+const balanceOf = a => effectsOn(a).reduce((sum, e) => sum + e.delta, a.baseAmount);
+
 function totals() {
   let assets = 0, liabilities = 0;
   const byType = {};
@@ -704,15 +777,17 @@ function totals() {
 }
 const newestFirst = (a, b) => (a.date === b.date ? b.createdAt - a.createdAt : (a.date < b.date ? 1 : -1));
 function monthStats(ym) {
-  let income = 0, expense = 0;
+  let income = 0, expense = 0, transfer = 0;
   const list = [];
   for (const t of state.txs) {
     if (!t.date.startsWith(ym)) continue;
     list.push(t);
-    if (t.kind === 'income') income += t.amount; else expense += t.amount;
+    if (t.kind === 'income') income += t.amount;
+    else if (t.kind === 'expense') expense += t.amount;
+    else transfer += t.amount;              // 이체는 수입·지출에 넣지 않음
   }
   list.sort(newestFirst);
-  return { income, expense, net: income - expense, list };
+  return { income, expense, transfer, net: income - expense, list };
 }
 
 /* =========================================================
@@ -723,6 +798,7 @@ const ICON = {
   eyeOff: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="3"/><path d="M4 4l16 16"/></svg>',
   chevL: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>',
   chevR: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg>',
+  swap: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 20V4M8 4 4.5 7.5M8 4l3.5 3.5M16 4v16M16 20l-3.5-3.5M16 20l3.5-3.5"/></svg>',
 };
 const TITLES = { home: '내 자산관리', assets: '자산', ledger: '가계부', settings: '설정' };
 
@@ -757,10 +833,21 @@ function notices() {
   return h;
 }
 
+// 가계부 한 줄
 function txRow(t, showDate = false) {
+  const date = showDate ? shortDate(t.date) : '';
+  if (t.kind === 'transfer') {
+    const to = accName(t.toAccountId) || '받는 곳 없음';
+    const from = accName(t.accountId);
+    const sub = [date, from ? `${from}에서` : '', t.memo].filter(Boolean).join(' · ');
+    return `<li><button class="row" type="button" data-action="edit-tx" data-id="${esc(t.id)}">
+      <span class="row-icon" aria-hidden="true">🔁</span>
+      <span class="row-main"><span class="row-title">${esc(`${to}${josaRo(to)} 이체`)}</span>${sub ? `<span class="row-sub">${esc(sub)}</span>` : ''}</span>
+      <span class="row-amt transfer">${won(t.amount)}</span>
+    </button></li>`;
+  }
   const c = CAT[t.category] || { label: '기타', icon: '📌' };
-  const acc = t.accountId ? state.assets.find(a => a.id === t.accountId) : null;
-  const sub = [showDate ? shortDate(t.date) : '', t.memo, acc ? acc.name : ''].filter(Boolean).join(' · ');
+  const sub = [date, t.memo, accName(t.accountId)].filter(Boolean).join(' · ');
   const signed = t.kind === 'income' ? t.amount : -t.amount;
   return `<li><button class="row" type="button" data-action="edit-tx" data-id="${esc(t.id)}">
     <span class="row-icon" aria-hidden="true">${c.icon}</span>
@@ -774,6 +861,7 @@ function sumRows(M) {
     <div class="sumrow"><span class="k">수입</span><span class="v income">${won(M.income, { sign: true })}</span></div>
     <div class="sumrow"><span class="k">지출</span><span class="v">${won(-M.expense, { sign: true })}</span></div>
     <div class="sumrow total"><span class="k">남은 돈</span><span class="v">${won(M.net, { sign: true })}</span></div>
+    ${M.transfer ? `<div class="sumrow xfer"><span class="k">이체 (계좌 간 이동)</span><span class="v">${won(M.transfer)}</span></div>` : ''}
   </div>`;
 }
 
@@ -790,7 +878,7 @@ function viewHome() {
       <p>두 가지만 하면 내 순자산이 자동으로 계산돼요.</p>
       <ol class="steps">
         <li><b>자산 등록</b> — 통장·예금·적금·투자·부동산·대출 금액을 입력해요.</li>
-        <li><b>가계부 기록</b> — 매일 쓴 돈과 들어온 돈을 기록해요.</li>
+        <li><b>가계부 기록</b> — 쓴 돈, 들어온 돈, 계좌 사이 이체를 기록해요.</li>
       </ol>
       <div class="btn-row">
         <button class="btn primary" type="button" data-action="new-asset">자산 등록하기</button>
@@ -877,20 +965,22 @@ function viewAssets() {
       <ul class="list card">${list.map(assetRow).join('')}</ul>
     </section>`;
   }
-  h += '<p class="hint center">항목을 누르면 금액을 고치거나 삭제할 수 있어요.</p>';
+  h += '<p class="hint center">항목을 누르면 금액이 바뀐 기록을 보고, 수정·이체할 수 있어요.</p>';
   return h;
 }
 function assetRow(a) {
-  const subs = [];
-  if (isLinkable(a)) {
-    const n = state.txs.filter(t => t.accountId === a.id && t.appliedAt > a.baseAt).length;
-    subs.push(n ? `가계부 ${n}건 반영` : '가계부 연결 가능');
-  } else if (a.baseAt) {
-    subs.push(shortDate(ymd(new Date(a.baseAt))) + ' 기준');
+  // 가장 최근에 금액을 바꾼 기록을 보여줌 (예: 최근 −300,000원 · 저축보험으로 이체)
+  const effects = effectsOn(a).sort((x, y) => newestFirst(x.t, y.t));
+  let sub;
+  if (effects.length) {
+    const e = effects[0];
+    const cls = !isLiab(a) && e.delta > 0 ? ' class="income"' : '';
+    sub = `최근 <span${cls}>${won(e.delta, { sign: true })}</span> · ${esc(effectTitle(e))}`;
+  } else {
+    sub = esc([a.baseAt ? shortDate(ymd(new Date(a.baseAt))) + ' 기준' : '', a.memo].filter(Boolean).join(' · '));
   }
-  if (a.memo) subs.push(a.memo);
-  return `<li><button class="row" type="button" data-action="edit-asset" data-id="${esc(a.id)}">
-    <span class="row-main"><span class="row-title">${esc(a.name)}</span><span class="row-sub">${esc(subs.join(' · '))}</span></span>
+  return `<li><button class="row" type="button" data-action="view-asset" data-id="${esc(a.id)}">
+    <span class="row-main"><span class="row-title">${esc(a.name)}</span><span class="row-sub">${sub}</span></span>
     <span class="row-amt">${won(balanceOf(a))}</span>
   </button></li>`;
 }
@@ -925,7 +1015,7 @@ function viewLedger() {
   if (!M.list.length) {
     h += `<section class="card empty"><div class="big" aria-hidden="true">📝</div>
       <h2>이 달의 기록이 없어요</h2>
-      <p>오른쪽 아래 <b>+</b> 버튼으로<br>쓴 돈 · 들어온 돈을 기록해 보세요.</p></section>`;
+      <p>오른쪽 아래 <b>+</b> 버튼으로<br>쓴 돈 · 들어온 돈 · 이체를 기록해 보세요.</p></section>`;
     return h;
   }
   const days = new Map();
@@ -1019,18 +1109,23 @@ window.addEventListener('popstate', () => {
 });
 
 let lastFocus = null;
-function openSheet(title, html, mount) {
-  const sheet = $('#sheet'), bd = $('#sheet-backdrop');
-  lastFocus = document.activeElement;
+// replace: true 이면 이미 열린 시트의 내용만 바꿈 (예: 계좌 상세 → 수정 화면)
+function openSheet(title, html, mount, opts = {}) {
+  const sheet = $('#sheet'), bd = $('#sheet-backdrop'), body = $('#sheet-body');
+  const top = layers[layers.length - 1];
+  const replacing = !!opts.replace && !!top && top.hide === hideSheet && sheet.classList.contains('show');
+  if (!replacing) lastFocus = document.activeElement;
   $('#sheet-title').textContent = title;
-  $('#sheet-body').innerHTML = html;
-  sheet.hidden = false; bd.hidden = false;
-  void sheet.offsetHeight;                     // 애니메이션 시작점 확정
-  sheet.classList.add('show'); bd.classList.add('show');
-  document.body.classList.add('locked');
-  $('#sheet-body').scrollTop = 0;
-  pushLayer({ hide: hideSheet });
-  if (mount) mount($('#sheet-body'));
+  body.innerHTML = html;
+  body.scrollTop = 0;
+  if (!replacing) {
+    sheet.hidden = false; bd.hidden = false;
+    void sheet.offsetHeight;                     // 애니메이션 시작점 확정
+    sheet.classList.add('show'); bd.classList.add('show');
+    document.body.classList.add('locked');
+    pushLayer({ hide: hideSheet });
+  }
+  if (mount) mount(body);
 }
 function hideSheet() {
   const sheet = $('#sheet'), bd = $('#sheet-backdrop');
@@ -1074,19 +1169,83 @@ function toast(msg) {
   el.textContent = msg;
   el.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.classList.remove('show'), 2200);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 2400);
+}
+
+// 계좌 고르기 목록 (자산 종류별로 묶어서)
+function accountOptions(placeholder) {
+  let h = `<option value="">${esc(placeholder)}</option>`;
+  for (const ty of ASSET_TYPES) {
+    const list = state.assets.filter(a => a.type === ty.id);
+    if (!list.length) continue;
+    h += `<optgroup label="${esc(ty.label)}">${list.map(a =>
+      `<option value="${esc(a.id)}">${esc(a.name)} · ${isLiab(a) ? '부채' : '잔액'} ${esc(won(balanceOf(a)))}</option>`).join('')}</optgroup>`;
+  }
+  return h;
 }
 
 /* =========================================================
-   6) 자산 추가 · 수정 화면
+   6) 계좌 상세 (금액이 바뀐 기록: 나간 돈 −, 들어온 돈 +)
    ========================================================= */
-function openAssetForm(id) {
-  const a = id ? state.assets.find(x => x.id === id) : null;
+// 이 자산 입장에서 본 기록 이름: "저축보험으로 이체" / "국민은행 통장에서 이체" / "식비"
+function effectTitle({ t, dir }) {
+  if (t.kind !== 'transfer') return (CAT[t.category] || { label: '기타' }).label;
+  if (dir === 'out') { const to = accName(t.toAccountId) || '받는 곳 없음'; return `${to}${josaRo(to)} 이체`; }
+  return `${accName(t.accountId) || '보낸 곳 없음'}에서 이체`;
+}
+function historyRow(e, liab) {
+  const { t, delta } = e;
+  const title = effectTitle(e);
+  const sub = [shortDate(t.date), t.memo].filter(Boolean).join(' · ');
+  const cls = !liab && delta > 0 ? ' plus' : '';
+  return `<li><span class="h-main"><span class="h-title">${esc(title)}</span><span class="h-sub">${esc(sub)}</span></span>
+    <span class="h-amt${cls}">${won(delta, { sign: true })}</span></li>`;
+}
+function openAssetDetail(id, opts = {}) {
+  const a = assetById(id);
+  if (!a) return;
+  const ty = TYPE[a.type];
+  const liab = isLiab(a);
+  const bal = balanceOf(a);
+  const effects = effectsOn(a).sort((x, y) => newestFirst(x.t, y.t));
+  const shown = effects.slice(0, 30);
+  const approx = !state.settings.hideAmounts && Math.abs(bal) >= 1e4 ? ' · 약 ' + koreanApprox(bal) : '';
+  const baseDay = a.baseAt ? shortDate(ymd(new Date(a.baseAt))) : '';
+  const html = `<div class="detail">
+    <div class="detail-type"><span class="dot" style="background:var(--c${ty.color})"></span>${esc(ty.label)}${a.memo ? ' · ' + esc(a.memo) : ''}</div>
+    <div class="detail-bal" id="detail-bal">${won(bal)}</div>
+    <div class="detail-sub">${liab ? '남은 부채' : '현재 금액'}${esc(approx)}</div>
+    <div class="detail-actions">
+      <button class="btn" type="button" data-role="edit">수정</button>
+      <button class="btn primary" type="button" data-role="transfer">${liab ? '갚기 (이체)' : '이체하기'}</button>
+    </div>
+    <h3 class="sheet-section">${liab ? '부채가 바뀐 기록' : '금액이 바뀐 기록'}</h3>
+    <ul class="history" id="detail-history">
+      ${shown.map(e => historyRow(e, liab)).join('')}
+      <li class="h-base"><span class="h-main"><span class="h-title">직접 입력한 금액</span>
+        <span class="h-sub">${esc([baseDay ? baseDay + ' 입력' : '', '여기에 위 기록이 더해지고 빠져요'].filter(Boolean).join(' · '))}</span></span>
+        <span class="h-amt">${won(a.baseAmount)}</span></li>
+    </ul>
+    ${effects.length > shown.length ? `<p class="hint center">최근 ${shown.length}건만 보여요 (모두 ${effects.length}건)</p>` : ''}
+    <div class="sheet-end"></div>
+  </div>`;
+  openSheet(a.name, html, root => {
+    root.querySelector('[data-role="edit"]').addEventListener('click', () => openAssetForm(a.id, { replace: true }));
+    root.querySelector('[data-role="transfer"]').addEventListener('click', () =>
+      openTxForm(null, { replace: true, preset: liab ? { kind: 'transfer', to: a.id } : { kind: 'transfer', from: a.id } }));
+  }, opts);
+}
+
+/* =========================================================
+   7) 자산 추가 · 수정 화면
+   ========================================================= */
+function openAssetForm(id, opts = {}) {
+  const a = id ? assetById(id) : null;
   if (id && !a) return;
   const typeId = a ? a.type : 'cash';
   const bal = a ? balanceOf(a) : 0;
-  const linked = a ? state.txs.filter(t => t.accountId === a.id) : [];
-  const pending = a ? linked.filter(t => t.appliedAt > a.baseAt).length : 0;
+  const linked = a ? state.txs.filter(t => t.accountId === a.id || t.toAccountId === a.id) : [];
+  const pending = a ? effectsOn(a).length : 0;
   const html = `<form class="form" id="asset-form" novalidate autocomplete="off">
     <fieldset class="field">
       <legend class="label">종류</legend>
@@ -1102,7 +1261,7 @@ function openAssetForm(id) {
       <div class="money-input"><input class="input-money" id="a-amount" inputmode="numeric" placeholder="0" value="${a && bal >= 0 ? fmt(bal) : ''}" enterkeyhint="done"><span class="unit">원</span></div>
       <p class="hint reading" id="a-reading" aria-live="polite"></p>
       ${pending ? `<p class="hint">이 금액에는 가계부 기록 ${pending}건이 반영되어 있어요. 숫자를 직접 고치면 고친 금액이 새 기준이 돼요.</p>` : ''}
-      ${a && bal < 0 ? `<p class="hint">현재 잔액은 ${esc(won(bal))}이에요. 새 금액을 입력하면 그 금액으로 바뀌어요.</p>` : ''}
+      ${a && bal < 0 ? `<p class="hint">현재 금액은 ${esc(won(bal))}이에요. 새 금액을 입력하면 그 금액으로 바뀌어요.</p>` : ''}
     </div>
     <div class="field">
       <label class="label" for="a-memo">메모 <span class="opt">(선택)</span></label>
@@ -1125,9 +1284,9 @@ function openAssetForm(id) {
       $('#a-type-hint', root).textContent = t.hint;
       nameEl.placeholder = t.ph;
       $('#a-amount-label', root).textContent = t.amountLabel;
-      $('#a-link-note', root).textContent = !t.linkable ? ''
-        : t.kind === 'liability' ? '가계부에서 이 항목을 결제수단으로 고르면, 쓴 만큼 부채가 자동으로 늘어나요.'
-        : '가계부에서 이 계좌를 고르면, 쓴 돈·들어온 돈이 잔액에 자동으로 반영돼요.';
+      $('#a-link-note', root).textContent = t.kind === 'liability'
+        ? '가계부에서 이 부채로 결제하면 늘어나고, 이체로 갚으면 줄어들어요.'
+        : '가계부에서 이 자산을 고르면 쓴 돈·들어온 돈·이체 금액이 자동으로 반영돼요.';
     };
     const reading = () => { const n = parseAmount(amtEl.value); $('#a-reading', root).textContent = n >= 1e4 ? koreanReading(n) : ''; };
     $$('input[name="atype"]', root).forEach(r => r.addEventListener('change', sync));
@@ -1157,40 +1316,43 @@ function openAssetForm(id) {
     if (del) del.addEventListener('click', async () => {
       const ok = await confirmDialog({
         title: `'${a.name}'을(를) 삭제할까요?`,
-        message: linked.length ? `연결된 가계부 기록 ${linked.length}건은 지워지지 않고 '선택 안 함'으로 바뀌어요.` : '삭제하면 되돌릴 수 없어요.',
+        message: linked.length ? `연결된 가계부 기록 ${linked.length}건은 지워지지 않고 남아요. (계좌 이름은 '삭제된 계좌'로 보여요)` : '삭제하면 되돌릴 수 없어요.',
         ok: '삭제', danger: true,
       });
       if (!ok) return;
       state.assets = state.assets.filter(x => x.id !== a.id);
-      for (const t of state.txs) if (t.accountId === a.id) t.accountId = '';
       saveState(); closeLayers(1); render(); toast('삭제했어요');
     });
-  });
+  }, opts);
 }
 
 /* =========================================================
-   7) 가계부 기록 · 수정 화면
+   8) 가계부 기록 · 수정 화면 (지출 · 수입 · 이체)
    ========================================================= */
-function openTxForm(id) {
+function openTxForm(id, opts = {}) {
   const t = id ? state.txs.find(x => x.id === id) : null;
   if (id && !t) return;
-  let kind = t ? t.kind : 'expense';
-  const accounts = state.assets.filter(isLinkable);
-  if (t && t.accountId && !accounts.some(a => a.id === t.accountId)) {
-    const extra = state.assets.find(a => a.id === t.accountId);
-    if (extra) accounts.push(extra);
-  }
+  const preset = opts.preset || {};
+  let kind = t ? t.kind : (KINDS.includes(preset.kind) ? preset.kind : 'expense');
+  const hasAccounts = state.assets.length > 0;
   const defDate = t ? t.date : (ui.tab === 'ledger' && ui.month !== thisMonth() ? ui.month + '-01' : today());
+
+  // 직접 고친 금액에 이미 포함된 기록이면 알려주기
   let note = '';
-  if (t && t.accountId) {
-    const acc = state.assets.find(a => a.id === t.accountId);
-    if (acc && t.appliedAt <= acc.baseAt) note = `<p class="hint">이 기록은 '${esc(acc.name)}' 금액을 직접 고치기 전에 입력돼서, 여기서 금액을 바꿔도 그 잔액은 바뀌지 않아요.</p>`;
+  if (t) {
+    const absorbed = [];
+    const a1 = assetById(t.accountId);
+    if (a1 && t.appliedAt <= a1.baseAt) absorbed.push(a1.name);
+    const a2 = t.kind === 'transfer' ? assetById(t.toAccountId) : null;
+    if (a2 && t.toAppliedAt <= a2.baseAt) absorbed.push(a2.name);
+    if (absorbed.length) note = `<p class="hint">이 기록은 '${esc(absorbed.join("', '"))}' 금액을 직접 고치기 전에 입력돼서, 여기서 고쳐도 그 금액은 바뀌지 않아요.</p>`;
   }
-  const accOption = a => `<option value="${esc(a.id)}">${esc(a.name)} · ${isLiab(a) ? '부채' : '잔액'} ${esc(won(balanceOf(a)))}</option>`;
+
   const html = `<form class="form" id="tx-form" novalidate autocomplete="off">
     <div class="segmented" role="radiogroup" aria-label="구분">
       <label><input type="radio" name="kind" value="expense"${kind === 'expense' ? ' checked' : ''}><span>지출</span></label>
       <label><input type="radio" name="kind" value="income"${kind === 'income' ? ' checked' : ''}><span>수입</span></label>
+      <label><input type="radio" name="kind" value="transfer"${kind === 'transfer' ? ' checked' : ''}><span>이체</span></label>
     </div>
     <div class="field">
       <label class="label" for="t-amount">금액</label>
@@ -1200,66 +1362,119 @@ function openTxForm(id) {
         <button type="button" data-add="1000">+1천</button><button type="button" data-add="10000">+1만</button><button type="button" data-add="50000">+5만</button><button type="button" data-add="100000">+10만</button><button type="button" data-add="0">지우기</button>
       </div>
     </div>
-    <fieldset class="field">
+    <fieldset class="field" id="f-cats">
       <legend class="label">분류</legend>
       <div class="chips" id="t-cats"></div>
     </fieldset>
+    <div class="field" id="f-account">
+      <label class="label" for="t-account" id="t-account-label">어느 계좌에서?</label>
+      <select class="input" id="t-account">${accountOptions('선택 안 함')}</select>
+      <p class="hint">${hasAccounts ? '고르면 그 계좌 금액이 자동으로 바뀌어요.' : '자산 탭에 계좌를 등록하면 금액과 연결할 수 있어요.'}</p>
+    </div>
+    <div class="field" id="f-xfer">
+      <label class="label" for="t-from">보내는 곳 <span class="opt">(금액만큼 −)</span></label>
+      <select class="input" id="t-from">${accountOptions('보내는 계좌 선택')}</select>
+      <div class="swap-row"><button type="button" class="swap-btn" id="t-swap" aria-label="보내는 곳과 받는 곳 바꾸기">${ICON.swap}바꾸기</button></div>
+      <label class="label" for="t-to">받는 곳 <span class="opt">(금액만큼 +)</span></label>
+      <select class="input" id="t-to">${accountOptions('받는 계좌 선택')}</select>
+      <p class="xfer-note" id="t-xfer-note"></p>
+    </div>
     <div class="field">
       <label class="label" for="t-date">날짜</label>
       <input class="input" type="date" id="t-date" value="${esc(defDate)}" required>
     </div>
     <div class="field">
-      <label class="label" for="t-account">어느 계좌에서? <span class="opt">(선택)</span></label>
-      <select class="input" id="t-account">
-        <option value="">선택 안 함</option>
-        ${accounts.map(accOption).join('')}
-      </select>
-      <p class="hint">${accounts.length ? '고르면 그 계좌 잔액(또는 부채)이 자동으로 바뀌어요.' : '자산 탭에 현금·통장을 등록하면 잔액과 연결할 수 있어요.'}</p>
-    </div>
-    <div class="field">
       <label class="label" for="t-memo">메모 <span class="opt">(선택)</span></label>
-      <input class="input" id="t-memo" maxlength="100" value="${esc(t ? t.memo : '')}" placeholder="예) 점심, 마트 장보기" enterkeyhint="done">
+      <input class="input" id="t-memo" maxlength="100" value="${esc(t ? t.memo : '')}" placeholder="예) 점심, 10월 적금 납입" enterkeyhint="done">
     </div>
     ${note}
     <p class="error" id="t-error" role="alert"></p>
     <div class="form-actions">
       ${t ? '<button type="button" class="btn danger-ghost" data-role="delete">삭제</button>' : ''}
-      <button type="submit" class="btn primary grow">${t ? '저장' : '기록하기'}</button>
+      <button type="submit" class="btn primary grow" id="t-submit">${t ? '저장' : '기록하기'}</button>
     </div>
   </form>`;
 
   openSheet(t ? '가계부 수정' : '가계부 기록', html, root => {
     const amtEl = $('#t-amount', root), catsEl = $('#t-cats', root), accEl = $('#t-account', root);
+    const fromEl = $('#t-from', root), toEl = $('#t-to', root), noteEl = $('#t-xfer-note', root);
     const dateEl = $('#t-date', root), memoEl = $('#t-memo', root), errEl = $('#t-error', root);
-    let cat = t ? t.category : null;
+    const exists = v => !!v && state.assets.some(a => a.id === v);
+    const pick = (el, v) => { el.value = exists(v) ? v : ''; };
+    let cat = t && t.kind !== 'transfer' ? t.category : null;
+
+    // 처음 값 채우기
+    if (t) {
+      if (t.kind === 'transfer') { pick(fromEl, t.accountId); pick(toEl, t.toAccountId); }
+      else pick(accEl, t.accountId);
+    } else {
+      const la = state.settings.lastAccount;
+      pick(accEl, la[kind] || '');
+      const firstCash = (state.assets.find(a => a.type === 'cash') || {}).id;
+      pick(fromEl, preset.from || la.transferFrom || firstCash);
+      pick(toEl, preset.to || la.transferTo);
+      if (preset.from && !preset.to && toEl.value === fromEl.value) toEl.value = '';
+      if (preset.to && !preset.from) {
+        pick(fromEl, la.transferFrom || firstCash);
+        if (fromEl.value === toEl.value) fromEl.value = '';
+      }
+      if (fromEl.value && fromEl.value === toEl.value) toEl.value = '';
+    }
+
     const drawCats = () => {
       const list = catsOf(kind);
       if (!list.some(c => c.id === cat)) cat = list[0].id;
       catsEl.innerHTML = list.map(c => `<label class="chip"><input type="radio" name="cat" value="${c.id}"${c.id === cat ? ' checked' : ''}><span><span aria-hidden="true">${c.icon}</span>${esc(c.label)}</span></label>`).join('');
     };
+    const updateNote = () => {
+      const n = parseAmount(amtEl.value);
+      const from = assetById(fromEl.value), to = assetById(toEl.value);
+      const money = n ? fmt(n) + '원' : '금액';
+      if (state.assets.length < 2) { noteEl.textContent = '이체하려면 자산 탭에 계좌를 2개 이상 등록해 주세요.'; return; }
+      if (from && to && from.id === to.id) { noteEl.textContent = '보내는 곳과 받는 곳이 같아요. 다른 계좌를 골라 주세요.'; return; }
+      const parts = [];
+      if (from) parts.push(`${from.name} ${isLiab(from) ? '부채 +' : '−'}${money}`);
+      if (to) parts.push(`${to.name} ${isLiab(to) ? '부채 −' : '+'}${money}`);
+      noteEl.textContent = parts.length === 2
+        ? `${parts[0]}  →  ${parts[1]} · 순자산은 그대로예요`
+        : '보내는 곳은 금액만큼 줄고(−), 받는 곳은 늘어나요(+). 순자산은 그대로예요.';
+    };
+    const applyKind = () => {
+      const isX = kind === 'transfer';
+      $('#f-cats', root).hidden = isX;
+      $('#f-account', root).hidden = isX;
+      $('#f-xfer', root).hidden = !isX;
+      root.querySelector('.segmented').dataset.kind = kind;
+      $('#t-account-label', root).textContent = kind === 'income' ? '어느 계좌로 들어왔나요?' : '어느 계좌에서 나갔나요?';
+      $('#t-submit', root).textContent = t ? '저장' : (isX ? '이체 기록하기' : '기록하기');
+      if (!isX) drawCats();
+      updateNote();
+      errEl.textContent = '';
+    };
     const setKind = k => {
+      const prev = kind;
       kind = k;
-      root.querySelector('.segmented').dataset.kind = k;
-      drawCats();
-      if (!t) {   // 새 기록이면 지난번에 고른 계좌를 미리 선택
-        const last = state.settings.lastAccount[k];
-        accEl.value = accounts.some(a => a.id === last) ? last : '';
-      }
+      // 종류를 바꿀 때 고른 계좌를 이어서 사용
+      if (k === 'transfer' && prev !== 'transfer' && accEl.value && !fromEl.value) fromEl.value = accEl.value;
+      if (k !== 'transfer' && prev === 'transfer' && fromEl.value) accEl.value = fromEl.value;
+      if (!t && k !== 'transfer' && prev !== 'transfer') pick(accEl, state.settings.lastAccount[k] || accEl.value);
+      applyKind();
     };
     const reading = () => { const n = parseAmount(amtEl.value); $('#t-reading', root).textContent = n >= 1e4 ? koreanReading(n) : ''; };
 
     catsEl.addEventListener('change', e => { if (e.target.name === 'cat') cat = e.target.value; });
     $$('input[name="kind"]', root).forEach(r => r.addEventListener('change', () => setKind(r.value)));
-    amtEl.addEventListener('input', () => { formatMoneyInput(amtEl); reading(); errEl.textContent = ''; });
+    amtEl.addEventListener('input', () => { formatMoneyInput(amtEl); reading(); updateNote(); errEl.textContent = ''; });
+    [fromEl, toEl].forEach(el => el.addEventListener('change', () => { updateNote(); errEl.textContent = ''; }));
+    $('#t-swap', root).addEventListener('click', () => { const v = fromEl.value; fromEl.value = toEl.value; toEl.value = v; updateNote(); });
     root.querySelector('.quick').addEventListener('click', e => {
       const b = e.target.closest('button[data-add]');
       if (!b) return;
       const add = Number(b.dataset.add);
       amtEl.value = add ? fmt(Math.min(parseAmount(amtEl.value) + add, MAX_AMOUNT)) : '';
-      reading(); errEl.textContent = '';
+      reading(); updateNote(); errEl.textContent = '';
     });
-    setKind(kind);
-    if (t) accEl.value = t.accountId || '';
+    applyKind();
     reading();
     if (!t) setTimeout(() => amtEl.focus(), 280);
 
@@ -1269,20 +1484,43 @@ function openTxForm(id) {
       if (!amount) { errEl.textContent = '금액을 입력해 주세요.'; amtEl.focus(); return; }
       const date = dateEl.value;
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { errEl.textContent = '날짜를 선택해 주세요.'; dateEl.focus(); return; }
-      const accountId = accEl.value;
+      let accountId = '', toAccountId = '';
+      if (kind === 'transfer') {
+        accountId = fromEl.value; toAccountId = toEl.value;
+        if (!accountId || !toAccountId) {
+          errEl.textContent = state.assets.length >= 2 ? '보내는 곳과 받는 곳을 모두 골라 주세요.' : '자산 탭에 계좌를 2개 이상 등록해야 이체할 수 있어요.';
+          return;
+        }
+        if (accountId === toAccountId) { errEl.textContent = '보내는 곳과 받는 곳이 같아요.'; return; }
+      } else {
+        accountId = accEl.value;
+      }
+      const category = kind === 'transfer' ? 'transfer' : cat;
       const memo = memoEl.value.trim();
       const now = Date.now();
       if (t) {
-        if (t.accountId !== accountId) t.appliedAt = now;   // 계좌를 바꾸면 새 계좌에 반영
-        Object.assign(t, { kind, amount, category: cat, date, accountId, memo, updatedAt: now });
+        if (t.accountId !== accountId) t.appliedAt = now;                // 계좌를 바꾸면 새 계좌에 반영
+        if ((t.toAccountId || '') !== toAccountId) t.toAppliedAt = now;
+        Object.assign(t, { kind, amount, category, date, accountId, toAccountId, memo, updatedAt: now });
+        if (kind !== 'transfer') t.toAppliedAt = 0;
       } else {
-        state.txs.push({ id: newId(), kind, amount, category: cat, date, accountId, memo, createdAt: now, updatedAt: now, appliedAt: now });
+        state.txs.push({
+          id: newId(), kind, amount, category, date, accountId, toAccountId, memo,
+          createdAt: now, updatedAt: now, appliedAt: now, toAppliedAt: kind === 'transfer' ? now : 0,
+        });
       }
-      state.settings.lastAccount[kind] = accountId;
+      if (kind === 'transfer') {
+        state.settings.lastAccount.transferFrom = accountId;
+        state.settings.lastAccount.transferTo = toAccountId;
+      } else {
+        state.settings.lastAccount[kind] = accountId;
+      }
       saveState(); closeLayers(1);
       if (ui.tab === 'ledger') ui.month = date.slice(0, 7);
       render();
-      toast(t ? '저장했어요' : `${kind === 'income' ? '수입' : '지출'} ${won(amount)} 기록했어요`);
+      if (t) toast('저장했어요');
+      else if (kind === 'transfer') { const to = accName(toAccountId); toast(`${accName(accountId)}에서 ${to}${josaRo(to)} ${won(amount)} 이체했어요`); }
+      else toast(`${kind === 'income' ? '수입' : '지출'} ${won(amount)} 기록했어요`);
     });
 
     const del = root.querySelector('[data-role="delete"]');
@@ -1292,11 +1530,11 @@ function openTxForm(id) {
       state.txs = state.txs.filter(x => x.id !== t.id);
       saveState(); closeLayers(1); render(); toast('삭제했어요');
     });
-  });
+  }, opts);
 }
 
 /* =========================================================
-   8) 백업 · 불러오기 · 전체 삭제 · 앱 설치
+   9) 백업 · 불러오기 · 전체 삭제 · 앱 설치
    ========================================================= */
 function backupJSON() {
   return JSON.stringify({ app: 'my-asset', appVersion: APP_VERSION, exportedAt: new Date().toISOString(), data: state }, null, 2);
@@ -1373,7 +1611,7 @@ async function doInstall() {
 }
 
 /* =========================================================
-   9) 버튼 눌림 처리 · 시작
+   10) 버튼 눌림 처리 · 시작
    ========================================================= */
 function setTab(tab) {
   ui.tab = TABS.includes(tab) ? tab : 'home';
@@ -1390,6 +1628,7 @@ document.addEventListener('click', e => {
   switch (el.dataset.action) {
     case 'tab': setTab(el.dataset.tab); break;
     case 'new-asset': openAssetForm(); break;
+    case 'view-asset': openAssetDetail(id); break;
     case 'edit-asset': openAssetForm(id); break;
     case 'new-tx': openTxForm(); break;
     case 'edit-tx': openTxForm(id); break;
