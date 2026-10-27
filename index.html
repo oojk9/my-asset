@@ -440,6 +440,33 @@ select.input {
 .sumrow.sub { margin-top: -4px; font-size: 14px; }
 .sumrow.sub .k, .sumrow.sub .v { color: var(--muted); font-weight: 600; }
 
+/* =========================================================
+   8) 기간 통계 (v1.3)
+   ========================================================= */
+.seg-tabs { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 4px; margin: 0 0 12px; padding: 4px; border-radius: 14px; background: var(--card); }
+.seg-tabs button { padding: 9px 8px; border: 0; border-radius: 11px; background: none; color: var(--muted); font-size: 15px; font-weight: 700; }
+.seg-tabs button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-ink); }
+.presets { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.presets button { padding: 7px 12px; border: 1.5px solid transparent; border-radius: 999px; background: var(--card-2); color: var(--ink-2); font-size: 14px; font-weight: 600; }
+.presets button[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-ink); font-weight: 700; }
+.period-range { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 8px; }
+.period-range .input { min-height: 46px; padding: 10px 32px 10px 12px; font-size: 14.5px; background-position: calc(100% - 19px) 50%, calc(100% - 13px) 50%; }
+.period-range .tilde { color: var(--muted); font-weight: 700; }
+.period-label { margin: 12px 0 4px; color: var(--accent-ink); font-size: 15px; font-weight: 700; }
+.catrow { display: block; width: 100%; padding: 8px 0; border: 0; border-radius: 8px; background: none; text-align: left; }
+.catrow:active { background: var(--card-2); }
+.catrow .cb-track { display: block; }
+.empty-li { padding: 6px 0; font-size: 14px; color: var(--muted); }
+.cat-total { display: flex; justify-content: space-between; gap: 12px; margin-top: 8px; padding-top: 10px; border-top: 1px solid var(--line); font-weight: 700; font-variant-numeric: tabular-nums; }
+.mtable-wrap { overflow-x: auto; }
+.mtable { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+.mtable th, .mtable td { padding: 7px 4px; border-top: 1px solid var(--line); text-align: right; white-space: nowrap; font-weight: 600; }
+.mtable thead th { border-top: 0; color: var(--ink-2); font-size: 12.5px; font-weight: 700; }
+.mtable th:first-child, .mtable td:first-child { text-align: left; }
+.mtable tbody th { color: var(--ink-2); }
+.mtable td.plus { color: var(--income); }
+.detail-bal.income { color: var(--income); }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; animation: none !important; }
 }
@@ -509,7 +536,7 @@ select.input {
 /* =========================================================
    0) 앱 정보 · 분류 목록  ← 분류 이름을 바꾸고 싶으면 여기를 고치세요
    ========================================================= */
-const APP_VERSION = '1.2.0';
+const APP_VERSION = '1.3.0';
 const DATA_VERSION = 3;                 // 데이터 구조 버전 (2: 이체 추가, 3: 신용카드 결제일·결제 통장)
 const STORAGE_KEY = 'myasset.v1';       // 휴대폰에 저장할 때 쓰는 이름 (기존 데이터를 그대로 읽도록 유지)
 const MAX_AMOUNT = 1e15;                // 입력 가능한 최대 금액 (천조 원)
@@ -913,15 +940,16 @@ function notices() {
 }
 
 // 가계부 한 줄
-function txRow(t, showDate = false) {
+function txRow(t, showDate = false, inSheet = false) {
   const date = showDate ? shortDate(t.date) : '';
+  const act = inSheet ? 'edit-tx-sheet' : 'edit-tx';   // 시트(분류 상세) 안에서는 그 자리에서 수정 화면으로
   if (t.kind === 'transfer') {
     const toCard = isCard(assetById(t.toAccountId));
     const to = accName(t.toAccountId) || '받는 곳 없음';
     const from = accName(t.accountId);
     const sub = [date, from ? `${from}에서` : '', t.memo].filter(Boolean).join(' · ');
     const title = toCard ? `${to} 카드값 결제` : `${to}${josaRo(to)} 이체`;
-    return `<li><button class="row" type="button" data-action="edit-tx" data-id="${esc(t.id)}">
+    return `<li><button class="row" type="button" data-action="${act}" data-id="${esc(t.id)}">
       <span class="row-icon" aria-hidden="true">${toCard ? '💳' : '🔁'}</span>
       <span class="row-main"><span class="row-title">${esc(title)}</span>${sub ? `<span class="row-sub">${esc(sub)}</span>` : ''}</span>
       <span class="row-amt transfer">${won(t.amount)}</span>
@@ -931,7 +959,7 @@ function txRow(t, showDate = false) {
   const acc = accName(t.accountId);
   const sub = [date, t.memo, acc && isCard(assetById(t.accountId)) ? '💳 ' + acc : acc].filter(Boolean).join(' · ');
   const signed = t.kind === 'income' ? t.amount : -t.amount;
-  return `<li><button class="row" type="button" data-action="edit-tx" data-id="${esc(t.id)}">
+  return `<li><button class="row" type="button" data-action="${act}" data-id="${esc(t.id)}">
     <span class="row-icon" aria-hidden="true">${c.icon}</span>
     <span class="row-main"><span class="row-title">${esc(c.label)}</span>${sub ? `<span class="row-sub">${esc(sub)}</span>` : ''}</span>
     <span class="row-amt${t.kind === 'income' ? ' income' : ''}">${won(signed, { sign: true })}</span>
@@ -1114,9 +1142,10 @@ function dayGroups(list) {
   return h;
 }
 function viewLedger() {
+  let h = notices() + ledgerModeTabs();
+  if (ui.ledgerMode === 'period') return h + viewPeriod();
   const ym = ui.month;
   const M = monthStats(ym);
-  let h = notices();
   h += monthNav(ym);
   h += `<section class="card">${sumRows(M)}</section>`;
 
@@ -1125,7 +1154,7 @@ function viewLedger() {
   const rows = Object.entries(byCat).sort((a, b) => b[1] - a[1]);
   if (rows.length) {
     const max = rows[0][1];
-    h += `<section class="card"><div class="card-head"><h2>분류별 지출</h2><span class="muted-s">이 달 지출 기준</span></div>
+    h += `<section class="card"><div class="card-head"><h2>분류별 지출</h2><button class="link" type="button" data-action="period-from-month">기간 통계 ›</button></div>
       <ul class="catbars">${rows.map(([id, v]) => {
         const c = CAT[id] || { label: '기타', icon: '📌' };
         return `<li><div class="cb-top"><span class="cb-name"><span aria-hidden="true">${c.icon}</span> ${esc(c.label)}</span>
@@ -1141,6 +1170,135 @@ function viewLedger() {
     return h;
   }
   return h + dayGroups(M.list);
+}
+
+/* ---------------------------------------------------------
+   기간 통계 (v1.3): 최대 12개월 동안 분류별 수입·지출 합계
+   예) 8월 부수입, 8월 급여·수입 합계, 1~3월 식비 합계
+   --------------------------------------------------------- */
+const MAX_MONTHS = 12;
+const PRESETS = [['this', '이번 달'], ['last', '지난달'], ['3m', '최근 3개월'], ['year', '올해'], ['12m', '최근 12개월']];
+function presetRange(id) {
+  const cur = thisMonth();
+  const r = { this: [cur, cur], last: [shiftMonth(cur, -1), shiftMonth(cur, -1)], '3m': [shiftMonth(cur, -2), cur],
+    year: [cur.slice(0, 4) + '-01', cur], '12m': [shiftMonth(cur, -(MAX_MONTHS - 1)), cur] }[id] || [cur, cur];
+  return { start: r[0], end: r[1], preset: id };
+}
+function monthsBetween(a, b) {
+  const out = [];
+  for (let m = a; m <= b && out.length < 600; m = shiftMonth(m, 1)) out.push(m);
+  return out;
+}
+const rangeLabel = (a, b) => (a === b ? monthLabel(a) : `${monthLabel(a)} ~ ${monthLabel(b)}`);
+const shortMonth = (m, withYear) => (withYear ? `${m.slice(2, 4)}년 ${Number(m.slice(5))}월` : `${Number(m.slice(5))}월`);
+const cell = (n, signed) => (state.settings.hideAmounts ? '•••' : (signed && n > 0 ? '+' : n < 0 ? '−' : '') + fmt(Math.abs(n)));
+// 고를 수 있는 달: 2년 전 ~ 이번 달 (기록이 더 예전·나중이면 거기까지)
+function monthOptions(selected) {
+  const cur = thisMonth();
+  let first = shiftMonth(cur, -23), last = cur;
+  for (const t of state.txs) { const m = t.date.slice(0, 7); if (m < first) first = m; if (m > last) last = m; }
+  return monthsBetween(first, last).reverse()
+    .map(m => `<option value="${m}"${m === selected ? ' selected' : ''}>${monthLabel(m)}</option>`).join('');
+}
+function periodStats(start, end) {
+  const from = start + '-01', to = end + '-31';
+  const months = monthsBetween(start, end);
+  const byMonth = Object.fromEntries(months.map(m => [m, { income: 0, expense: 0 }]));
+  const inc = {}, exp = {};
+  let income = 0, expense = 0, transfer = 0, card = 0, count = 0;
+  for (const t of state.txs) {
+    if (t.date < from || t.date > to) continue;
+    const bm = byMonth[t.date.slice(0, 7)];
+    if (t.kind === 'income') {
+      income += t.amount; inc[t.category] = (inc[t.category] || 0) + t.amount; if (bm) bm.income += t.amount; count++;
+    } else if (t.kind === 'expense') {
+      expense += t.amount; exp[t.category] = (exp[t.category] || 0) + t.amount; if (bm) bm.expense += t.amount; count++;
+      if (isCard(assetById(t.accountId))) card += t.amount;
+    } else {
+      transfer += t.amount;                 // 이체·카드값 결제는 수입·지출에 넣지 않음
+    }
+  }
+  return { months, byMonth, inc, exp, income, expense, transfer, card, net: income - expense, count };
+}
+function ledgerModeTabs() {
+  const b = (id, label) => `<button type="button" data-action="ledger-mode" data-id="${id}" aria-pressed="${ui.ledgerMode === id}">${label}</button>`;
+  return `<div class="seg-tabs" role="group" aria-label="가계부 보기">${b('month', '월별 내역')}${b('period', '기간 통계')}</div>`;
+}
+function catCard(kind, title, map, total) {
+  const rows = Object.entries(map).sort((a, b) => b[1] - a[1]);
+  const isInc = kind === 'income';
+  const body = rows.length ? rows.map(([id, v]) => {
+    const c = CAT[id] || { label: '기타', icon: '📌' };
+    return `<li><button class="catrow" type="button" data-action="cat-stats" data-kind="${kind}" data-id="${esc(id)}">
+      <span class="cb-top"><span class="cb-name"><span aria-hidden="true">${c.icon}</span> ${esc(c.label)}</span>
+        <span class="cb-pct">${(v / total * 100).toFixed(1)}%</span><span class="cb-val${isInc ? ' income' : ''}">${won(v)}</span></span>
+      <span class="cb-track" aria-hidden="true"><span class="cb-bar" style="width:${(v / rows[0][1] * 100).toFixed(2)}%"></span></span>
+    </button></li>`;
+  }).join('') : `<li class="empty-li">이 기간에 ${isInc ? '수입' : '지출'} 기록이 없어요.</li>`;
+  return `<section class="card" id="cat-${kind}"><div class="card-head"><h2>${title}</h2><span class="muted-s">누르면 월별·기록</span></div>
+    <ul class="catbars">${body}</ul>
+    <div class="cat-total"><span>${isInc ? '수입' : '지출'} 합계</span><span class="${isInc ? 'income' : ''}" id="cat-${kind}-total">${won(total)}</span></div>
+  </section>`;
+}
+function viewPeriod() {
+  const P = ui.period;
+  const S = periodStats(P.start, P.end);
+  let h = `<section class="card period">
+    <div class="presets" role="group" aria-label="빠른 기간 선택">
+      ${PRESETS.map(([id, label]) => `<button type="button" data-action="period-preset" data-id="${id}" aria-pressed="${P.preset === id}">${label}</button>`).join('')}
+    </div>
+    <div class="period-range">
+      <select class="input" id="p-start" aria-label="시작 월">${monthOptions(P.start)}</select>
+      <span class="tilde" aria-hidden="true">~</span>
+      <select class="input" id="p-end" aria-label="끝 월">${monthOptions(P.end)}</select>
+    </div>
+    <p class="period-label" id="period-label">${esc(rangeLabel(P.start, P.end))} · ${S.months.length}개월</p>
+    <p class="hint">최대 12개월까지 볼 수 있어요. 이체·카드값 결제는 수입·지출에 넣지 않아요.</p>
+  </section>`;
+  h += `<section class="card" id="period-sum">${sumRows(S)}</section>`;
+  if (!S.count) {
+    return h + `<section class="card empty"><div class="big" aria-hidden="true">📊</div>
+      <h2>이 기간에 수입·지출 기록이 없어요</h2><p>위에서 다른 기간을 골라 보세요.</p></section>`;
+  }
+  h += catCard('income', '수입 분류별', S.inc, S.income);
+  h += catCard('expense', '지출 분류별', S.exp, S.expense);
+  if (S.months.length > 1) {
+    const multiYear = P.start.slice(0, 4) !== P.end.slice(0, 4);
+    h += `<section class="card"><div class="card-head"><h2>월별 합계</h2><span class="muted-s">단위: 원</span></div>
+      <div class="mtable-wrap"><table class="mtable" id="month-table">
+        <thead><tr><th scope="col">월</th><th scope="col">수입</th><th scope="col">지출</th><th scope="col">남은 돈</th></tr></thead>
+        <tbody>${S.months.map(m => { const r = S.byMonth[m]; return `<tr><th scope="row">${esc(shortMonth(m, multiYear))}</th>
+          <td class="plus">${cell(r.income)}</td><td>${cell(r.expense)}</td><td>${cell(r.income - r.expense, true)}</td></tr>`; }).join('')}</tbody>
+      </table></div></section>`;
+  }
+  return h;
+}
+// 분류 하나를 누르면: 기간 합계 · 월별 · 기록 목록
+function openCatStats(kind, cat) {
+  const { start, end } = ui.period;
+  const months = monthsBetween(start, end);
+  const from = start + '-01', to = end + '-31';
+  const list = state.txs.filter(t => t.kind === kind && t.category === cat && t.date >= from && t.date <= to).sort(newestFirst);
+  const byM = Object.fromEntries(months.map(m => [m, 0]));
+  for (const t of list) { const m = t.date.slice(0, 7); if (m in byM) byM[m] += t.amount; }
+  const total = list.reduce((sum, t) => sum + t.amount, 0);
+  const c = CAT[cat] || { label: '기타', icon: '📌' };
+  const max = Math.max(1, ...Object.values(byM));
+  const multiYear = start.slice(0, 4) !== end.slice(0, 4);
+  const shown = list.slice(0, 100);
+  const html = `<div class="detail">
+    <div class="detail-type"><span aria-hidden="true">${c.icon}</span>${kind === 'income' ? '수입' : '지출'} · ${esc(rangeLabel(start, end))}</div>
+    <div class="detail-bal${kind === 'income' ? ' income' : ''}" id="cat-detail-total">${won(total)}</div>
+    <div class="detail-sub">${months.length}개월${months.length > 1 ? ` · 월평균 ${won(Math.round(total / months.length))}` : ''} · ${list.length}건</div>
+    ${months.length > 1 ? `<h3 class="sheet-section">월별</h3>
+    <ul class="catbars" id="cat-detail-months">${months.map(m => `<li><div class="cb-top"><span class="cb-name">${esc(shortMonth(m, multiYear))}</span><span class="cb-val">${won(byM[m])}</span></div>
+      <div class="cb-track" aria-hidden="true">${byM[m] ? `<span class="cb-bar" style="width:${(byM[m] / max * 100).toFixed(2)}%"></span>` : ''}</div></li>`).join('')}</ul>` : ''}
+    <h3 class="sheet-section">기록 ${list.length}건 <span class="opt">· 누르면 고칠 수 있어요</span></h3>
+    <ul class="list flush" id="cat-detail-list">${shown.map(t => txRow(t, true, true)).join('')}</ul>
+    ${list.length > shown.length ? `<p class="hint center">최근 ${shown.length}건만 보여요</p>` : ''}
+    <div class="sheet-end"></div>
+  </div>`;
+  openSheet(`${c.label} 합계`, html);
 }
 
 // 신용카드 화면
@@ -1874,6 +2032,11 @@ document.addEventListener('click', e => {
     case 'card-spend': openTxForm(null, { preset: { kind: 'expense', account: id } }); break;
     case 'pay-card': openCardPay(id); break;
     case 'edit-tx': openTxForm(id); break;
+    case 'edit-tx-sheet': openTxForm(id, { replace: true }); break;
+    case 'ledger-mode': ui.ledgerMode = id === 'period' ? 'period' : 'month'; render(); window.scrollTo(0, 0); break;
+    case 'period-from-month': ui.period = { start: ui.month, end: ui.month, preset: ui.month === thisMonth() ? 'this' : '' }; ui.ledgerMode = 'period'; render(); window.scrollTo(0, 0); break;
+    case 'period-preset': ui.period = presetRange(id); render(); break;
+    case 'cat-stats': openCatStats(el.dataset.kind, id); break;
     case 'month-prev': ui.month = shiftMonth(ui.month, -1); render(); break;
     case 'month-next': ui.month = shiftMonth(ui.month, 1); render(); break;
     case 'month-now': ui.month = thisMonth(); render(); break;
@@ -1892,6 +2055,20 @@ document.addEventListener('click', e => {
   }
 });
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && layers.length) closeLayers(1); });
+// 기간 통계: 시작 월 · 끝 월 바꾸기 (최대 12개월, 거꾸로 고르면 자동으로 바로잡음)
+document.addEventListener('change', e => {
+  const id = e.target && e.target.id;
+  if (id !== 'p-start' && id !== 'p-end') return;
+  let { start, end } = ui.period;
+  if (id === 'p-start') start = e.target.value; else end = e.target.value;
+  if (start > end) [start, end] = [end, start];
+  if (monthsBetween(start, end).length > MAX_MONTHS) {
+    if (id === 'p-start') end = shiftMonth(start, MAX_MONTHS - 1); else start = shiftMonth(end, -(MAX_MONTHS - 1));
+    toast('기간은 최대 12개월까지 볼 수 있어요');
+  }
+  ui.period = { start, end, preset: '' };
+  render();
+});
 $('#file-import').addEventListener('change', e => {
   const f = e.target.files && e.target.files[0];
   e.target.value = '';
@@ -1900,10 +2077,26 @@ $('#file-import').addEventListener('change', e => {
 // 다른 창에서 데이터가 바뀌면 다시 읽기
 window.addEventListener('storage', e => { if (e.key === STORAGE_KEY && !layers.length) { state = loadState(); render(); } });
 // 앱으로 돌아왔을 때 날짜(오늘·이번 달) 새로 반영
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && !layers.length) render(); });
+// 그사이 달이 바뀌었으면: 보고 있던 달이 '이번 달'이었으면 새 달로, 빠른 선택(이번 달·최근 3개월 등) 기간도 새 달 기준으로
+let seenMonth = thisMonth();
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible' || layers.length) return;
+  const cur = thisMonth();
+  if (cur !== seenMonth) {
+    if (ui.month === seenMonth) ui.month = cur;
+    if (ui.period.preset) ui.period = presetRange(ui.period.preset);
+    seenMonth = cur;
+  }
+  render();
+});
 
 let state = loadState();
-const ui = { tab: TABS.includes(location.hash.slice(1)) ? location.hash.slice(1) : 'home', month: thisMonth(), seg: null };
+const ui = {
+  tab: TABS.includes(location.hash.slice(1)) ? location.hash.slice(1) : 'home',
+  month: thisMonth(), seg: null,
+  ledgerMode: 'month',                 // 가계부: 'month'(월별 내역) | 'period'(기간 통계)
+  period: presetRange('this'),         // 기간 통계에서 고른 기간
+};
 if (history.state && history.state.myassetLayer) history.replaceState(null, '', location.href);
 render();
 requestPersist();
