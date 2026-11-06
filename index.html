@@ -487,6 +487,11 @@ textarea.input { min-height: 132px; resize: vertical; line-height: 1.45; font-si
 .switchrow span { display: block; min-width: 0; }
 .switchrow b { display: block; font-size: 15px; }
 .switchrow small { display: block; margin-top: 2px; font-size: 13px; color: var(--ink-2); line-height: 1.4; }
+.inlog { list-style: none; margin: 0 0 10px; padding: 0; }
+.inlog li { padding: 8px 0; border-top: 1px solid var(--line); font-size: 13px; }
+.inlog li:first-child { border-top: 0; }
+.inlog b { display: block; font-size: 13px; }
+.inlog span { display: block; color: var(--ink-2); overflow-wrap: anywhere; }
 .btn-stack { display: flex; flex-direction: column; gap: 6px; flex: none; }
 .btn-stack .btn { min-height: 38px; padding: 0 14px; font-size: 14px; }
 .notice.install .btn-stack .btn { background: var(--card); }
@@ -561,7 +566,7 @@ textarea.input { min-height: 132px; resize: vertical; line-height: 1.45; font-si
 /* =========================================================
    0) 앱 정보 · 분류 목록  ← 분류 이름을 바꾸고 싶으면 여기를 고치세요
    ========================================================= */
-const APP_VERSION = '1.5.0';
+const APP_VERSION = '1.5.1';
 const DATA_VERSION = 5;                 // 데이터 구조 버전 (2: 이체, 3: 신용카드 결제일·결제 통장, 4: 문자 식별 단어·문자 기록 이력, 5: 자동 기록 표시·바로 기록 설정·내 이름)
 const STORAGE_KEY = 'myasset.v1';       // 휴대폰에 저장할 때 쓰는 이름 (기존 데이터를 그대로 읽도록 유지)
 const MAX_AMOUNT = 1e15;                // 입력 가능한 최대 금액 (천조 원)
@@ -744,7 +749,7 @@ function emptyState() {
   return {
     version: DATA_VERSION, assets: [], txs: [],
     settings: { hideAmounts: false, lastAccount: { expense: '', income: '', transferFrom: '', transferTo: '' }, lastBackupAt: 0,
-      smsSeen: [], smsAuto: true, myName: '' },
+      smsSeen: [], smsAuto: true, myName: '', inLog: [] },
   };
 }
 
@@ -805,6 +810,9 @@ function normalize(raw) {
   s.settings.smsSeen = (Array.isArray(st.smsSeen) ? st.smsSeen : []).filter(x => typeof x === 'string' && x.length <= 16).slice(-300);
   s.settings.smsAuto = st.smsAuto !== false;                   // 문자·알림이 확실하면 바로 기록 (기본 켬)
   s.settings.myName = str(st.myName, 30).trim();               // 내 이름 (내 계좌 간 이체 알아보기)
+  // 자동화 앱·공유로 열린 기록 (진단용, 최근 10개): { at, q(받은 내용 요약), result }
+  s.settings.inLog = (Array.isArray(st.inLog) ? st.inLog : []).filter(x => x && typeof x === 'object')
+    .map(x => ({ at: num(x.at), q: str(x.q, 400), result: str(x.result, 120) })).slice(-10);
   return s;
 }
 
@@ -1632,6 +1640,12 @@ function viewSettings() {
          <div class="copybox"><code id="sms-url">${esc(smsUrl('sms'))}</code><button class="btn small" type="button" data-action="copy-url" data-id="sms">복사</button></div>
          <p class="hint">{ } 부분은 MacroDroid가 알림·문자 내용으로 바꿔 넣는 자리예요. 그대로 붙여넣으세요.</p>`
       : '<p class="hint">인터넷 주소(GitHub Pages)로 열면 여기에 자동화 앱용 주소가 나와요.</p>'}
+    <p class="label" id="inlog-head">최근 받은 알림 <span class="opt">(진단용 · 최근 ${state.settings.inLog.length}개)</span></p>
+    ${state.settings.inLog.length
+      ? `<ul class="inlog" id="inlog">${[...state.settings.inLog].reverse().map(e => `<li><b>${esc(stampLabel(e.at))} · ${esc(e.result)}</b><span>${esc(e.q)}</span></li>`).join('')}</ul>
+         <button class="btn small" type="button" data-action="copy-inlog">기록 복사</button>
+         <p class="hint">자동화 앱이 앱을 열 때마다 무엇이 들어왔는지 남겨요. 잘 안 되면 [기록 복사]해서 보내 주세요.</p>`
+      : '<p class="hint" id="inlog-empty">아직 자동화 앱이나 공유로 열린 적이 없어요. 자동화 앱이 앱을 열면 여기에 남아요. 매크로가 돌았는데도 비어 있으면, 앱이 주소 없이 열린 거예요 (액션이 \'웹사이트 열기\'인지 확인).</p>'}
   </section>
   <section class="card">
     <h2>저장 현황</h2>
@@ -2211,15 +2225,25 @@ function openTxForm(id, opts = {}) {
 /* =========================================================
    8-2) 문자로 기록 (v1.4): 붙여넣기 화면 · 공유/자동화 앱에서 들어온 문자
    ========================================================= */
+// 자동화 앱·공유로 열린 기록 남기기 (설정 → '최근 받은 알림'에서 확인·복사)
+function logIncoming(entry, result) {
+  if (!entry) return;
+  entry.result = result;
+  if (!state.settings.inLog.includes(entry)) state.settings.inLog.push(entry);
+  if (state.settings.inLog.length > 10) state.settings.inLog.splice(0, state.settings.inLog.length - 10);
+  saveState();
+}
 // 문자·알림 내용 → 읽어서 (확실하면 바로 기록 / 아니면) 입력창 열기. 못 읽으면 붙여넣기 화면이나 배너에 이유 표시
 function handleIncoming(text, opts = {}) {
   const p = parseSms(text, { app: opts.app });
   if (!p.ok) {
+    logIncoming(opts.log, '못 읽음: ' + p.reason);
     if (opts.app) { ui.lastAuto = { failed: text, reason: p.reason, app: opts.app }; render(); toast('읽지 못한 알림이에요'); }
     else openSmsPaste(text, { error: p.reason });
     return;
   }
-  if (state.settings.smsAuto && autoRecord(p)) return;
+  if (state.settings.smsAuto && autoRecord(p)) { logIncoming(opts.log, ui.lastAuto && ui.lastAuto.text ? '바로 기록: ' + ui.lastAuto.text : '이미 기록한 알림'); return; }
+  logIncoming(opts.log, '입력창 열림 (' + (p.kind === 'income' ? '수입' : '지출') + ' ' + fmt(p.amount) + '원)');
   openTxForm(null, { preset: smsToPreset(p) });
 }
 const normName = s => String(s || '').toLowerCase().replace(/\s+/g, '');
@@ -2238,7 +2262,7 @@ function autoRecord(p) {
   const cands = smsMatchAccounts(p);
   if (cands.length !== 1 || !(p.amount > 0)) return false;
   const acc = cands[0], now = Date.now();
-  if (state.settings.smsSeen.includes(p.hash)) { showLedgerFor(p.date); toast('이미 기록한 알림이에요'); return true; }
+  if (state.settings.smsSeen.includes(p.hash)) { ui.lastAuto = null; showLedgerFor(p.date); toast('이미 기록한 알림이에요'); return true; }
   const mine = !!state.settings.myName && normName(p.memo).includes(normName(state.settings.myName));
   const mate = findAutoMate(p, acc);
   let tx, msg;
@@ -2276,6 +2300,11 @@ function autoRecord(p) {
 function autoBanner() {
   const la = ui.lastAuto;
   if (!la) return '';
+  if (la.setup) {
+    return `<section class="card notice warn" id="auto-banner"><div class="grow"><b>📩 자동화 앱 설정을 확인해 주세요</b>
+      <p>${esc(la.reason)}</p></div>
+      <button class="btn small" type="button" data-action="auto-dismiss">닫기</button></section>`;
+  }
   if (la.failed) {
     return `<section class="card notice warn" id="auto-banner"><div class="grow"><b>📩 읽지 못한 알림이 있어요</b>
       <p>${esc([la.app, la.reason].filter(Boolean).join(' · '))}</p></div>
@@ -2347,10 +2376,26 @@ function receiveShared() {
   const app = (q.get('app') || '').trim();
   const parts = ['title', 'text', 'sms'].map(k => (q.get(k) || '').trim()).filter(Boolean).filter(s => s !== app);
   history.replaceState(history.state, '', location.pathname + location.hash);   // 새로고침해도 다시 뜨지 않게
+  // 진단 기록: 무엇이 들어왔는지 (내용은 앞부분만)
+  const entry = { at: Date.now(), q: [...q.entries()].map(([k, v]) => `${k}=${v.replace(/\s+/g, ' ').slice(0, 120)}`).join(' | ').slice(0, 400), result: '' };
   // 공유할 때 제목이 본문의 첫 줄과 같으면 한 번만 (알림 제목 '출금'처럼 본문 안에 들어 있는 짧은 말은 그대로 둠)
   const text = parts.filter((s, i) => !parts.some((o, j) => j !== i && o.length > s.length && o.split('\n').some(l => l.trim() === s))).join('\n');
-  if (!text) return;
-  setTimeout(() => handleIncoming(text, { app }), 60);
+  const keys = [...q.keys()];
+  let problem = '';
+  if (!text) {
+    problem = `자동화 앱이 내용 없이 앱을 열었어요 (받은 항목: ${keys.length ? keys.join(', ') : '없음'}). ` +
+      (keys.includes('sms') && !keys.includes('text') ? "알림 트리거에 '문자(SMS)용' 주소를 쓰면 내용이 비어서 와요. 설정의 '앱 알림용' 주소를 써 주세요."
+        : 'MacroDroid 액션의 주소에서 { } 부분이 알림 내용으로 바뀌는지 확인해 주세요 (주소 칸 옆 … 버튼으로 알림 제목·알림 텍스트를 넣기).');
+  } else if (/\{(not_title|notification|not_app_name|not_text|sms_message)\}/.test(app + ' ' + text)) {
+    problem = '주소의 { } 부분이 알림 내용으로 바뀌지 않고 그대로 왔어요. MacroDroid 주소 칸에서 … (매직 텍스트) 버튼으로 알림 제목·알림 텍스트·앱 이름을 다시 넣어 주세요.';
+  }
+  if (problem) {
+    logIncoming(entry, '빈 내용/그대로 옴');
+    ui.lastAuto = { failed: '', reason: problem, app: '', setup: true };
+    render(); toast('자동화 앱 설정을 확인해 주세요');
+    return;
+  }
+  setTimeout(() => handleIncoming(text, { app, log: entry }), 60);
 }
 
 /* =========================================================
@@ -2456,6 +2501,12 @@ document.addEventListener('click', e => {
     case 'auto-open-failed': {
       const la = ui.lastAuto; ui.lastAuto = null; render();
       if (la && la.failed) openSmsPaste(la.failed, { error: la.reason });
+      break;
+    }
+    case 'auto-dismiss': ui.lastAuto = null; render(); break;
+    case 'copy-inlog': {
+      const txt = state.settings.inLog.map(e => `${stampLabel(e.at)} · ${e.result}\n${e.q}`).join('\n\n');
+      navigator.clipboard.writeText(txt).then(() => toast('기록을 복사했어요'), () => toast('복사하지 못했어요'));
       break;
     }
     case 'new-asset': openAssetForm(); break;
