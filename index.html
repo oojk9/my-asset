@@ -510,6 +510,7 @@ textarea.input { min-height: 132px; resize: vertical; line-height: 1.45; font-si
 .btn-stack { display: flex; flex-direction: column; gap: 6px; flex: none; }
 .btn-stack .btn { min-height: 38px; padding: 0 14px; font-size: 14px; }
 .notice.install .btn-stack .btn { background: var(--card); }
+.notice.install .btn-stack .btn.primary { background: var(--accent); color: #fff; }
 .notice.install .btn-stack .btn.danger-ghost { color: var(--danger); }
 
 @media (prefers-reduced-motion: reduce) {
@@ -581,7 +582,7 @@ textarea.input { min-height: 132px; resize: vertical; line-height: 1.45; font-si
 /* =========================================================
    0) 앱 정보 · 분류 목록  ← 분류 이름을 바꾸고 싶으면 여기를 고치세요
    ========================================================= */
-const APP_VERSION = '1.6.0';
+const APP_VERSION = '1.6.1';
 const DATA_VERSION = 6;                 // 데이터 구조 버전 (2: 이체, 3: 신용카드, 4: 문자 식별 단어·문자 기록 이력, 5: 자동 기록 표시·바로 기록 설정·내 이름, 6: 받은 알림함)
 const STORAGE_KEY = 'myasset.v1';       // 휴대폰에 저장할 때 쓰는 이름 (기존 데이터를 그대로 읽도록 유지)
 const DRAFT_KEY = STORAGE_KEY + '.draft';   // 작성 중이던 가계부 입력창 (알림 도착으로 앱이 다시 열려도 잃지 않게)
@@ -801,7 +802,7 @@ function normalize(raw) {
         accountId: str(t.accountId, 64), toAccountId: '',
         createdAt: num(t.createdAt), updatedAt: num(t.updatedAt),
         appliedAt: num(t.appliedAt, num(t.createdAt)), toAppliedAt: 0,
-        src: t.src === 'auto' ? 'auto' : '',                          // 'auto' = 문자·알림으로 자동 기록됨 (v5)
+        src: ['auto', 'sms'].includes(t.src) ? t.src : '',             // 'auto' = 알림으로 자동 기록, 'sms' = 알림·문자를 보고 입력창에서 확인해 기록 (v5)
       };
       if (t.kind === 'transfer') {
         tx.category = 'transfer';
@@ -1418,6 +1419,7 @@ function viewLedger() {
   const ym = ui.month;
   const M = monthStats(ym);
   h += monthNav(ym);
+  h += pairsBanner(ym);
   h += `<section class="card">${sumRows(M)}</section>`;
 
   const byCat = {};
@@ -2004,7 +2006,7 @@ function openTxForm(id, opts = {}) {
   const t = id ? state.txs.find(x => x.id === id) : null;
   if (id && !t) return;
   const dv = opts.draft || null;                                   // 이어서 쓰는 작성 중 기록
-  const preset = dv ? { inboxId: dv.inboxId || '', smsHash: dv.smsHash || '' } : (opts.preset || {});
+  const preset = dv ? { inboxId: dv.inboxId || '', smsHash: dv.smsHash || '', notifAt: dv.notifAt || 0 } : (opts.preset || {});
   let kind = t ? t.kind : (KINDS.includes(preset.kind) ? preset.kind : 'expense');
   const hasAccounts = state.assets.length > 0;
   const defDate = t ? t.date : (preset.date || ((ui.tab === 'ledger' || ui.tab === 'cards') && ui.month !== thisMonth() ? ui.month + '-01' : today()));
@@ -2193,7 +2195,7 @@ function openTxForm(id, opts = {}) {
       applyKind(); reading();
     }
     // 쓰는 동안 임시 저장 (알림이 와서 앱이 다시 열려도 잃지 않게)
-    const snapshot = () => { if (draftCtl.on) saveDraft({ id: t ? t.id : '', inboxId: preset.inboxId || '', smsHash: preset.smsHash || '', kind, amount: amtEl.value, cat,
+    const snapshot = () => { if (draftCtl.on) saveDraft({ id: t ? t.id : '', inboxId: preset.inboxId || '', smsHash: preset.smsHash || '', notifAt: preset.notifAt || 0, kind, amount: amtEl.value, cat,
       account: accEl.value, from: fromEl.value, to: toEl.value, date: dateEl.value, memo: memoEl.value }); };
     draftCtl.on = true;
     const scheduleDraft = () => { if (!draftCtl.on) return; clearTimeout(draftCtl.timer); draftCtl.timer = setTimeout(snapshot, 250); };
@@ -2223,18 +2225,24 @@ function openTxForm(id, opts = {}) {
       const category = kind === 'transfer' ? 'transfer' : cat;
       const memo = memoEl.value.trim();
       const now = Date.now();
+      const fromNotif = !t && !!(preset.smsHash || preset.inboxId);     // 알림·문자를 보고 기록하는 중
+      let merged = null;
       if (t) {
         if (t.accountId !== accountId) t.appliedAt = now;                // 계좌를 바꾸면 새 계좌에 반영
         if ((t.toAccountId || '') !== toAccountId) t.toAppliedAt = now;
         Object.assign(t, { kind, amount, category, date, accountId, toAccountId, memo, updatedAt: now });
         if (kind !== 'transfer') t.toAppliedAt = 0;
       } else {
-        state.txs.push({
+        const at = fromNotif && preset.notifAt ? preset.notifAt : now;  // 알림이 온 시각 (짝 맞추기·정렬에 씀)
+        const mate = fromNotif && kind !== 'transfer' && accountId && !isCard(assetById(accountId))
+          ? findMate({ kind, amount, accountId, at, memo, notif: true }) : null;
+        if (mate) merged = mergeIntoMate(mate, { kind, accountId });   // 반대쪽이 이미 있으면 새로 만들지 않고 이체 하나로
+        else state.txs.push({
           id: newId(), kind, amount, category, date, accountId, toAccountId, memo,
-          createdAt: now, updatedAt: now, appliedAt: now, toAppliedAt: kind === 'transfer' ? now : 0, src: '',
+          createdAt: at, updatedAt: now, appliedAt: now, toAppliedAt: kind === 'transfer' ? now : 0, src: fromNotif ? 'sms' : '',
         });
       }
-      const savedId = t ? t.id : state.txs[state.txs.length - 1].id;
+      const savedId = t ? t.id : merged ? merged.id : state.txs[state.txs.length - 1].id;
       if (preset.inboxId) inboxFinish(preset.inboxId, 'done', savedId, `${kind === 'income' ? '수입' : kind === 'transfer' ? '이체' : '지출'} ${won(amount)} 기록함`);
       if (kind === 'transfer') {
         state.settings.lastAccount.transferFrom = accountId;
@@ -2259,6 +2267,7 @@ function openTxForm(id, opts = {}) {
       }
       const accA = assetById(accountId), toA = assetById(toAccountId);
       if (t) toast('저장했어요');
+      else if (merged) toast('🔁 ' + mergedMsg(merged));
       else if (kind === 'transfer' && isCard(toA)) toast(`${toA.name} 카드값 ${won(amount)} 결제했어요`);
       else if (kind === 'transfer') { const to = accName(toAccountId); toast(`${accName(accountId)}에서 ${to}${josaRo(to)} ${won(amount)} 이체했어요`); }
       else if (kind === 'expense' && isCard(accA)) toast(`${accA.name}${josaRo(accA.name)} ${won(amount)} 결제 기록했어요`);
@@ -2301,36 +2310,93 @@ const normName = s => String(s || '').toLowerCase().replace(/\s+/g, '');
 function showLedgerFor(date) {
   ui.month = date.slice(0, 7); ui.ledgerMode = 'month'; setTab('ledger');
 }
-// 내 계좌 사이에서 돈을 옮기면 '출금' 알림과 '입금' 알림이 하나씩 와요 → 같은 금액·반대 방향·다른 계좌면 하나의 이체로 합침
-function findAutoMate(p, acc) {
-  const now = Date.now(), nm = normName(p.memo), opp = p.kind === 'expense' ? 'income' : 'expense';
-  return state.txs.find(t => t.src === 'auto' && t.amount === p.amount && t.accountId !== acc.id && t.toAccountId !== acc.id && (
-    (t.kind === 'transfer' && now - t.createdAt < 86400000 && (p.kind === 'expense' ? !t.accountId : !t.toAccountId)) ||   // 상대 계좌를 기다리던 이체 (24시간)
-    (t.kind === opp && now - t.createdAt < 1800000 && !!nm && normName(t.memo) === nm)));                                 // 같은 이름·반대 방향 (30분)
+/* ---------------------------------------------------------
+   내 계좌 사이에서 돈을 옮기면 '출금' 알림과 '입금' 알림이 하나씩 와요.
+   → 같은 금액 · 반대 방향 · 다른 계좌 · (같은 상대 이름이거나 내 이름이거나, 알림끼리 5분 이내)면 하나의 이체로 합쳐요.
+   --------------------------------------------------------- */
+const isNotif = t => t.src === 'auto' || t.src === 'sms';      // 알림·문자에서 온 기록
+// 상대 이름이 같은가 (띄어쓰기 무시, 한쪽이 다른 쪽을 포함해도, 둘 다 내 이름을 포함해도 같은 것으로)
+function memoMatch(a, b) {
+  const na = normName(a), nb = normName(b), me = normName(state.settings.myName);
+  if (me && (na.includes(me) || nb.includes(me))) return true;
+  if (!na || !nb) return false;
+  return na === nb || na.includes(nb) || nb.includes(na);
 }
-// 확실하면 바로 기록: 계좌(카드)가 하나로 정해지고 금액이 있을 때만. 기록했으면 { tx, msg }, 이미 기록한 알림이면 { dup }, 못 하면 null
-function autoRecord(p) {
+// 이 기록(side = {kind, amount, accountId, at, memo, notif})과 짝이 되는 기존 기록 찾기
+function findMate(side) {
+  const opp = side.kind === 'expense' ? 'income' : 'expense';
+  const near = (t, ms) => Math.abs(side.at - t.createdAt) < ms;
+  return state.txs.find(t => t.amount === side.amount && t.accountId !== side.accountId && t.toAccountId !== side.accountId && (
+    // ① 상대 계좌를 기다리던 반쪽 이체 (24시간)
+    (t.kind === 'transfer' && isNotif(t) && near(t, 86400000) && (side.kind === 'expense' ? !t.accountId : !t.toAccountId)) ||
+    // ② 반대 방향 기록 (알림·문자에서 온 것, 2시간 이내): 상대 이름이 같거나 내 이름이면. 알림끼리 5분 이내면 이름이 달라도 (출금 직후 같은 금액 입금 = 내 계좌 이체)
+    (t.kind === opp && isNotif(t) && !isCard(assetById(t.accountId)) && near(t, 7200000) &&
+      (memoMatch(t.memo, side.memo) || (side.notif && near(t, 300000))))));
+}
+// 짝을 하나의 이체로 합침 (mate를 고쳐서 돌려줌)
+function mergeIntoMate(mate, side) {
+  const now = Date.now();
+  if (mate.kind === 'income') { mate.toAccountId = mate.accountId; mate.toAppliedAt = mate.appliedAt; mate.accountId = side.accountId; mate.appliedAt = now; }
+  else if (mate.kind === 'expense') { mate.toAccountId = side.accountId; mate.toAppliedAt = now; }
+  else if (side.kind === 'expense') { mate.accountId = side.accountId; mate.appliedAt = now; }
+  else { mate.toAccountId = side.accountId; mate.toAppliedAt = now; }
+  Object.assign(mate, { kind: 'transfer', category: 'transfer', memo: '내 계좌 간 이체', updatedAt: now });
+  if (!mate.src) mate.src = 'sms';
+  return mate;
+}
+const mergedMsg = tx => `이체로 합쳤어요: ${accName(tx.accountId)} → ${accName(tx.toAccountId)} ${won(tx.amount)}`;
+// 이미 지출·수입 2건으로 잡힌 내 계좌 간 이체 찾기 (같은 날 · 같은 금액 · 반대 방향 · 다른 통장 · 상대 이름이 같거나 내 이름, 또는 알림끼리 30분 이내)
+function findTransferPairs(ym) {
+  const used = new Set(), pairs = [];
+  const bank = t => t.accountId && assetById(t.accountId) && !isCard(assetById(t.accountId));
+  const list = state.txs.filter(t => t.date.startsWith(ym) && t.kind !== 'transfer' && bank(t));
+  for (const e of list.filter(t => t.kind === 'expense')) {
+    const i = list.find(t => t.kind === 'income' && !used.has(t.id) && t.amount === e.amount && t.date === e.date && t.accountId !== e.accountId &&
+      (memoMatch(t.memo, e.memo) || (isNotif(t) && isNotif(e) && Math.abs(t.createdAt - e.createdAt) < 1800000)));
+    if (i) { used.add(e.id); used.add(i.id); pairs.push({ out: e, inn: i }); }
+  }
+  return pairs;
+}
+function pairsBanner(ym) {
+  if (ui.pairsHidden === ym) return '';
+  const pairs = findTransferPairs(ym);
+  if (!pairs.length) return '';
+  const first = pairs[0];
+  const desc = `${accName(first.out.accountId)} → ${accName(first.inn.accountId)} ${won(first.out.amount)}${pairs.length > 1 ? ` 외 ${pairs.length - 1}쌍` : ''}`;
+  return `<section class="card notice install" id="pairs-banner"><div class="grow"><b>🔁 같은 금액의 출금·입금이 ${pairs.length}쌍 있어요</b>
+    <p>${esc(desc)} — 내 계좌끼리 옮긴 돈이면 이체 하나로 합칠 수 있어요.</p></div>
+    <div class="btn-stack"><button class="btn small primary" type="button" data-action="merge-pairs">이체로 합치기</button>
+    <button class="btn small" type="button" data-action="pairs-hide">아니요</button></div></section>`;
+}
+function mergePairs(ym) {
+  const pairs = findTransferPairs(ym);
+  for (const { out, inn } of pairs) {
+    mergeIntoMate(out, { kind: 'income', accountId: inn.accountId });   // 출금 기록을 이체로 바꾸고
+    out.toAppliedAt = inn.appliedAt;                                   // 받는 쪽 반영 시각은 원래 입금 기록 그대로 (잔액이 두 번 늘지 않게)
+    state.txs = state.txs.filter(t => t.id !== inn.id);                // 입금 기록은 지움
+    for (const x of state.inbox) if (x.txId === inn.id) x.txId = out.id;
+  }
+  saveState(); render();
+  toast(pairs.length ? `🔁 ${pairs.length}쌍을 이체로 합쳤어요` : '합칠 기록이 없어요');
+}
+// 확실하면 바로 기록: 계좌(카드)가 하나로 정해지고 금액이 있을 때만. at = 알림이 온 시각. 기록했으면 { tx, msg }, 이미 기록한 알림이면 { dup }, 못 하면 null
+function autoRecord(p, at = Date.now()) {
   const cands = smsMatchAccounts(p);
   if (cands.length !== 1 || !(p.amount > 0)) return null;
   const acc = cands[0], now = Date.now();
   if (state.settings.smsSeen.includes(p.hash)) return { dup: true, msg: '이미 기록한 알림이에요' };
   const mine = !!state.settings.myName && normName(p.memo).includes(normName(state.settings.myName));
-  const mate = findAutoMate(p, acc);
+  const mate = !isCard(acc) && findMate({ kind: p.kind, amount: p.amount, accountId: acc.id, at, memo: p.memo, notif: true });
   let tx, msg;
   if (mate) {                                                     // 반대쪽 알림이 먼저 와 있었음 → 하나의 이체로
-    if (mate.kind === 'income') { mate.toAccountId = mate.accountId; mate.toAppliedAt = mate.appliedAt; mate.accountId = acc.id; mate.appliedAt = now; }
-    else if (mate.kind === 'expense') { mate.toAccountId = acc.id; mate.toAppliedAt = now; }
-    else if (p.kind === 'expense') { mate.accountId = acc.id; mate.appliedAt = now; }
-    else { mate.toAccountId = acc.id; mate.toAppliedAt = now; }
-    Object.assign(mate, { kind: 'transfer', category: 'transfer', memo: '내 계좌 간 이체', updatedAt: now });
-    tx = mate;
-    msg = `이체로 합쳤어요: ${accName(tx.accountId)} → ${accName(tx.toAccountId)} ${won(tx.amount)}`;
+    tx = mergeIntoMate(mate, { kind: p.kind, accountId: acc.id });
+    msg = mergedMsg(tx);
   } else {
     const preset = smsToPreset(p);                                // 카드값·적금 같은 이체 제안 포함
     const isX = preset.kind === 'transfer';
     tx = { id: newId(), kind: isX || mine ? 'transfer' : p.kind, date: p.date, amount: p.amount, src: 'auto',
       category: isX || mine ? 'transfer' : p.category, memo: mine ? '내 계좌 간 이체' : (p.memo || `${p.brand} 알림`.trim()),
-      accountId: '', toAccountId: '', createdAt: now, updatedAt: now, appliedAt: 0, toAppliedAt: 0 };
+      accountId: '', toAccountId: '', createdAt: at, updatedAt: now, appliedAt: 0, toAppliedAt: 0 };
     if (isX) { tx.accountId = preset.from; tx.toAccountId = preset.to; tx.appliedAt = now; tx.toAppliedAt = now; }
     else if (mine) { if (p.kind === 'expense') { tx.accountId = acc.id; tx.appliedAt = now; } else { tx.toAccountId = acc.id; tx.toAppliedAt = now; } }
     else { tx.accountId = acc.id; tx.appliedAt = now; }
@@ -2368,7 +2434,7 @@ function inboxArrive(app, text, log) {
   state.inbox.push(item);
   if (state.inbox.length > 200) state.inbox.splice(0, state.inbox.length - 200);
   if (p.ok && state.settings.smsAuto) {
-    const r = autoRecord(p);
+    const r = autoRecord(p, item.at);
     if (r && !r.dup) {
       item.status = 'done'; item.txId = r.tx.id; item.note = r.msg;
       saveState(); logIncoming(log, '바로 기록: ' + r.msg); afterAutoRecord(r); return;
@@ -2421,7 +2487,7 @@ function inboxRecord(id) {
   if (!x) return;
   const p = parseSms(x.text, { app: x.app });
   if (!p.ok) { openSmsPaste(x.text, { replace: true, error: p.reason, inboxId: x.id, app: x.app }); return; }
-  openTxForm(null, { replace: true, preset: { ...smsToPreset(p), inboxId: x.id } });
+  openTxForm(null, { replace: true, preset: { ...smsToPreset(p), inboxId: x.id, notifAt: x.at } });
 }
 // 알림함 항목 처리 끝 (기록함 / 건너뜀)
 function inboxFinish(id, status, txId = '', note = '') {
@@ -2436,7 +2502,7 @@ function inboxRecordAll() {
   for (const x of inboxPending()) {
     const p = parseSms(x.text, { app: x.app });
     if (!p.ok) continue;
-    const r = autoRecord(p);
+    const r = autoRecord(p, x.at);
     if (!r) continue;
     if (r.dup) { Object.assign(x, { status: 'skipped', note: '이미 기록한 알림' }); continue; }
     Object.assign(x, { status: 'done', txId: r.tx.id, note: r.msg }); n++; last = r;
@@ -2684,6 +2750,8 @@ document.addEventListener('click', e => {
       break;
     }
     case 'auto-dismiss': ui.lastAuto = null; render(); break;
+    case 'merge-pairs': mergePairs(ui.month); break;
+    case 'pairs-hide': ui.pairsHidden = ui.month; render(); break;
     case 'inbox-open': openInbox(); break;
     case 'inbox-record': inboxRecord(id); break;
     case 'inbox-skip': inboxFinish(id, 'skipped'); openInbox({ replace: true }); toast('건너뛰었어요'); break;
@@ -2785,6 +2853,7 @@ const ui = {
   period: presetRange('this'),         // 기간 통계에서 고른 기간
   lastAuto: null,                      // 방금 알림으로 자동 기록한 것 (가계부 위 배너: 고치기·지우기)
   draft: null,                         // 알림 도착으로 닫혀 버린, 작성 중이던 입력창 내용
+  pairsHidden: '',                     // '이체로 합치기' 배너를 닫은 달
 };
 ui.draft = loadDraft();
 if (history.state && history.state.myassetLayer) history.replaceState(null, '', location.href);
