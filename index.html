@@ -487,6 +487,21 @@ textarea.input { min-height: 132px; resize: vertical; line-height: 1.45; font-si
 .switchrow span { display: block; min-width: 0; }
 .switchrow b { display: block; font-size: 15px; }
 .switchrow small { display: block; margin-top: 2px; font-size: 13px; color: var(--ink-2); line-height: 1.4; }
+.inbox { list-style: none; margin: 0; padding: 0; }
+.inbox-item { padding: 12px 0; border-top: 1px solid var(--line); }
+.inbox-item:first-child { border-top: 0; }
+.ib-head { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; color: var(--ink-2); }
+.ib-head b { color: var(--ink); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-head span { flex: none; }
+.ib-sum { margin-top: 3px; font-size: 15.5px; font-weight: 700; overflow-wrap: anywhere; }
+.ib-sum.muted { color: var(--ink-2); font-weight: 600; }
+.ib-text { margin-top: 2px; font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
+.inbox-item .btn-row { margin-top: 10px; }
+.inbox-item .btn-row .btn { flex: 1 1 100px; }
+.inbox.small .inbox-item { padding: 8px 0; }
+.inbox-done { margin-top: 18px; }
+.inbox-done summary { cursor: pointer; font-size: 14px; font-weight: 700; color: var(--ink-2); padding: 6px 0; }
+.inbox-done .btn { margin-top: 10px; }
 .inlog { list-style: none; margin: 0 0 10px; padding: 0; }
 .inlog li { padding: 8px 0; border-top: 1px solid var(--line); font-size: 13px; }
 .inlog li:first-child { border-top: 0; }
@@ -566,9 +581,10 @@ textarea.input { min-height: 132px; resize: vertical; line-height: 1.45; font-si
 /* =========================================================
    0) 앱 정보 · 분류 목록  ← 분류 이름을 바꾸고 싶으면 여기를 고치세요
    ========================================================= */
-const APP_VERSION = '1.5.1';
-const DATA_VERSION = 5;                 // 데이터 구조 버전 (2: 이체, 3: 신용카드 결제일·결제 통장, 4: 문자 식별 단어·문자 기록 이력, 5: 자동 기록 표시·바로 기록 설정·내 이름)
+const APP_VERSION = '1.6.0';
+const DATA_VERSION = 6;                 // 데이터 구조 버전 (2: 이체, 3: 신용카드, 4: 문자 식별 단어·문자 기록 이력, 5: 자동 기록 표시·바로 기록 설정·내 이름, 6: 받은 알림함)
 const STORAGE_KEY = 'myasset.v1';       // 휴대폰에 저장할 때 쓰는 이름 (기존 데이터를 그대로 읽도록 유지)
+const DRAFT_KEY = STORAGE_KEY + '.draft';   // 작성 중이던 가계부 입력창 (알림 도착으로 앱이 다시 열려도 잃지 않게)
 const MAX_AMOUNT = 1e15;                // 입력 가능한 최대 금액 (천조 원)
 
 // 자산 종류: color = 차트 색 번호
@@ -747,7 +763,7 @@ function daysUntil(dt) {
    ========================================================= */
 function emptyState() {
   return {
-    version: DATA_VERSION, assets: [], txs: [],
+    version: DATA_VERSION, assets: [], txs: [], inbox: [],
     settings: { hideAmounts: false, lastAccount: { expense: '', income: '', transferFrom: '', transferTo: '' }, lastBackupAt: 0,
       smsSeen: [], smsAuto: true, myName: '', inLog: [] },
   };
@@ -797,6 +813,17 @@ function normalize(raw) {
       }
       s.txs.push(tx);
     }
+  }
+  // 받은 알림함 (v6): 자동화 앱이 넘겨준 알림을 처리 전까지 보관
+  if (Array.isArray(raw.inbox)) {
+    for (const x of raw.inbox) {
+      if (!x || typeof x !== 'object' || !x.text) continue;
+      s.inbox.push({
+        id: uid(x.id), at: num(x.at), app: str(x.app, 60), text: str(x.text, 2000), hash: str(x.hash, 16),
+        status: ['pending', 'done', 'skipped'].includes(x.status) ? x.status : 'pending', txId: str(x.txId, 64), note: str(x.note, 200),
+      });
+    }
+    s.inbox = s.inbox.slice(-200);
   }
   const st = raw.settings || {};
   const la = st.lastAccount || {};
@@ -1106,7 +1133,7 @@ function smsToPreset(p) {
   const cands = smsMatchAccounts(p);
   const src = cands[0] || null;
   const preset = { kind: p.kind, amount: p.amount, memo: p.memo, date: p.date, category: p.category, smsHash: p.hash };
-  const where = `${p.brand ? p.brand + (p.isCard ? '카드' : '은행') : '어디서 왔는지 모르는'} 문자`;
+  const where = `${p.brand ? p.brand + (p.isCard ? '카드' : '은행') : '어디서 왔는지 모르는'} ${p.app ? '알림' : '문자'}`;
   const notes = [`📩 ${where} · ${shortDate(p.date)}${p.time ? ' ' + p.time : ''} — 내용을 확인하고 [기록하기]를 누르세요.`];
   if (p.cancel) notes.push('취소·환불 문자라 돈이 다시 들어온 것으로 채웠어요.');
   if (!src) notes.push(p.brand ? `'${p.brand}' 이름이 들어간 계좌(카드)가 없어서 결제수단은 비워 뒀어요.` : '어느 계좌인지 못 찾아서 결제수단은 직접 골라 주세요.');
@@ -1225,7 +1252,7 @@ function viewHome() {
   const T = totals();
   const ym = thisMonth();
   const M = monthStats(ym);
-  let h = notices() + autoBanner();
+  let h = notices() + draftBanner() + autoBanner() + inboxBanner();
   if (!state.assets.length && !state.txs.length) {
     h += `<section class="card welcome">
       <div class="welcome-emoji" aria-hidden="true">👋</div>
@@ -1386,7 +1413,7 @@ function dayGroups(list) {
   return h;
 }
 function viewLedger() {
-  let h = notices() + autoBanner() + ledgerModeTabs();
+  let h = notices() + draftBanner() + autoBanner() + inboxBanner() + ledgerModeTabs();
   if (ui.ledgerMode === 'period') return h + viewPeriod();
   const ym = ui.month;
   const M = monthStats(ym);
@@ -1632,7 +1659,10 @@ function viewSettings() {
       <li><b>공유</b>: 문자 길게 누르기 → 공유 → <b>내 자산관리</b></li>
       <li><b>붙여넣기</b>: 아래 버튼, 또는 가계부 입력창의 [📩 문자 붙여넣기]</li>
     </ol>
-    <div class="btn-col"><button class="btn primary block" type="button" data-action="sms-paste">문자·알림 붙여넣어 기록</button></div>
+    <div class="btn-col">
+      <button class="btn primary block" type="button" data-action="inbox-open">받은 알림함 열기${inboxPending().length ? ` (확인할 알림 ${inboxPending().length}건)` : ''}</button>
+      <button class="btn block" type="button" data-action="sms-paste">문자·알림 붙여넣어 기록</button>
+    </div>
     ${location.protocol.startsWith('http')
       ? `<p class="label">자동화 앱에서 열 주소 — 앱 알림용</p>
          <div class="copybox"><code id="push-url">${esc(smsUrl('push'))}</code><button class="btn small" type="button" data-action="copy-url" data-id="push">복사</button></div>
@@ -1725,6 +1755,7 @@ function openSheet(title, html, mount, opts = {}) {
 }
 function hideSheet() {
   const sheet = $('#sheet'), bd = $('#sheet-backdrop');
+  if (sheet.querySelector('#tx-form')) clearDraft();           // 입력창을 직접 닫으면 임시 저장도 버림
   sheet.classList.remove('show'); bd.classList.remove('show');
   document.body.classList.remove('locked');
   if (document.activeElement && sheet.contains(document.activeElement)) document.activeElement.blur();
@@ -1972,7 +2003,8 @@ function openAssetForm(id, opts = {}) {
 function openTxForm(id, opts = {}) {
   const t = id ? state.txs.find(x => x.id === id) : null;
   if (id && !t) return;
-  const preset = opts.preset || {};
+  const dv = opts.draft || null;                                   // 이어서 쓰는 작성 중 기록
+  const preset = dv ? { inboxId: dv.inboxId || '', smsHash: dv.smsHash || '' } : (opts.preset || {});
   let kind = t ? t.kind : (KINDS.includes(preset.kind) ? preset.kind : 'expense');
   const hasAccounts = state.assets.length > 0;
   const defDate = t ? t.date : (preset.date || ((ui.tab === 'ledger' || ui.tab === 'cards') && ui.month !== thisMonth() ? ui.month + '-01' : today()));
@@ -2153,9 +2185,25 @@ function openTxForm(id, opts = {}) {
     });
     applyKind();
     reading();
+    // 작성 중이던 기록 이어서 쓰기
+    if (dv) {
+      if (KINDS.includes(dv.kind)) { kind = dv.kind; const r = root.querySelector(`input[name="kind"][value="${kind}"]`); if (r) r.checked = true; }
+      amtEl.value = dv.amount || ''; cat = dv.cat || cat; dateEl.value = dv.date || dateEl.value; memoEl.value = dv.memo || '';
+      pick(accEl, dv.account); pick(fromEl, dv.from); pick(toEl, dv.to);
+      applyKind(); reading();
+    }
+    // 쓰는 동안 임시 저장 (알림이 와서 앱이 다시 열려도 잃지 않게)
+    const snapshot = () => { if (draftCtl.on) saveDraft({ id: t ? t.id : '', inboxId: preset.inboxId || '', smsHash: preset.smsHash || '', kind, amount: amtEl.value, cat,
+      account: accEl.value, from: fromEl.value, to: toEl.value, date: dateEl.value, memo: memoEl.value }); };
+    draftCtl.on = true;
+    const scheduleDraft = () => { if (!draftCtl.on) return; clearTimeout(draftCtl.timer); draftCtl.timer = setTimeout(snapshot, 250); };
+    root.addEventListener('input', scheduleDraft);
+    root.addEventListener('change', scheduleDraft);
+    if (!t && parseAmount(amtEl.value) > 0) snapshot();        // 문자·알림으로 채워진 창은 열리자마자
     if (!t) setTimeout(() => amtEl.focus({ preventScroll: true }), 300);   // 열리는 애니메이션 중 스크롤이 튀지 않게
 
     $('#tx-form', root).addEventListener('submit', e => {
+      clearTimeout(draftCtl.timer);
       e.preventDefault();
       const amount = parseAmount(amtEl.value);
       if (!amount) { errEl.textContent = '금액을 입력해 주세요.'; amtEl.focus(); return; }
@@ -2186,6 +2234,8 @@ function openTxForm(id, opts = {}) {
           createdAt: now, updatedAt: now, appliedAt: now, toAppliedAt: kind === 'transfer' ? now : 0, src: '',
         });
       }
+      const savedId = t ? t.id : state.txs[state.txs.length - 1].id;
+      if (preset.inboxId) inboxFinish(preset.inboxId, 'done', savedId, `${kind === 'income' ? '수입' : kind === 'transfer' ? '이체' : '지출'} ${won(amount)} 기록함`);
       if (kind === 'transfer') {
         state.settings.lastAccount.transferFrom = accountId;
         state.settings.lastAccount.transferTo = toAccountId;
@@ -2197,8 +2247,11 @@ function openTxForm(id, opts = {}) {
         if (!seen.includes(preset.smsHash)) seen.push(preset.smsHash);
         if (seen.length > 300) seen.splice(0, seen.length - 300);
       }
-      saveState(); closeLayers(1);
-      if (preset.smsHash && !t) {                              // 문자로 기록했으면 그 달 가계부를 보여줌
+      saveState(); clearDraft(); closeLayers(1);
+      if (preset.inboxId && inboxPending().length) {           // 알림함에서 왔으면 다음 알림을 이어서 처리
+        setTimeout(() => openInbox(), 350);
+        render();
+      } else if (preset.smsHash && !t) {                       // 문자로 기록했으면 그 달 가계부를 보여줌
         ui.month = date.slice(0, 7); ui.ledgerMode = 'month'; setTab('ledger');
       } else {
         if (ui.tab === 'ledger' || ui.tab === 'cards') ui.month = date.slice(0, 7);
@@ -2217,7 +2270,7 @@ function openTxForm(id, opts = {}) {
       const ok = await confirmDialog({ title: '이 기록을 삭제할까요?', message: '삭제하면 되돌릴 수 없어요.', ok: '삭제', danger: true });
       if (!ok) return;
       state.txs = state.txs.filter(x => x.id !== t.id);
-      saveState(); closeLayers(1); render(); toast('삭제했어요');
+      saveState(); clearDraft(); closeLayers(1); render(); toast('삭제했어요');
     });
   }, opts);
 }
@@ -2233,16 +2286,14 @@ function logIncoming(entry, result) {
   if (state.settings.inLog.length > 10) state.settings.inLog.splice(0, state.settings.inLog.length - 10);
   saveState();
 }
-// 문자·알림 내용 → 읽어서 (확실하면 바로 기록 / 아니면) 입력창 열기. 못 읽으면 붙여넣기 화면이나 배너에 이유 표시
+// 공유로 들어온 문자·알림 → 읽어서 (확실하면 바로 기록 / 아니면) 입력창 열기. 못 읽으면 붙여넣기 화면에 이유 표시
 function handleIncoming(text, opts = {}) {
   const p = parseSms(text, { app: opts.app });
-  if (!p.ok) {
-    logIncoming(opts.log, '못 읽음: ' + p.reason);
-    if (opts.app) { ui.lastAuto = { failed: text, reason: p.reason, app: opts.app }; render(); toast('읽지 못한 알림이에요'); }
-    else openSmsPaste(text, { error: p.reason });
-    return;
+  if (!p.ok) { logIncoming(opts.log, '못 읽음: ' + p.reason); openSmsPaste(text, { error: p.reason }); return; }
+  if (state.settings.smsAuto) {
+    const r = autoRecord(p);
+    if (r) { logIncoming(opts.log, r.dup ? '이미 기록한 알림' : '바로 기록: ' + r.msg); afterAutoRecord(r); return; }
   }
-  if (state.settings.smsAuto && autoRecord(p)) { logIncoming(opts.log, ui.lastAuto && ui.lastAuto.text ? '바로 기록: ' + ui.lastAuto.text : '이미 기록한 알림'); return; }
   logIncoming(opts.log, '입력창 열림 (' + (p.kind === 'income' ? '수입' : '지출') + ' ' + fmt(p.amount) + '원)');
   openTxForm(null, { preset: smsToPreset(p) });
 }
@@ -2257,12 +2308,12 @@ function findAutoMate(p, acc) {
     (t.kind === 'transfer' && now - t.createdAt < 86400000 && (p.kind === 'expense' ? !t.accountId : !t.toAccountId)) ||   // 상대 계좌를 기다리던 이체 (24시간)
     (t.kind === opp && now - t.createdAt < 1800000 && !!nm && normName(t.memo) === nm)));                                 // 같은 이름·반대 방향 (30분)
 }
-// 확실하면 바로 기록: 계좌(카드)가 하나로 정해지고 금액이 있을 때만. 기록했으면 true
+// 확실하면 바로 기록: 계좌(카드)가 하나로 정해지고 금액이 있을 때만. 기록했으면 { tx, msg }, 이미 기록한 알림이면 { dup }, 못 하면 null
 function autoRecord(p) {
   const cands = smsMatchAccounts(p);
-  if (cands.length !== 1 || !(p.amount > 0)) return false;
+  if (cands.length !== 1 || !(p.amount > 0)) return null;
   const acc = cands[0], now = Date.now();
-  if (state.settings.smsSeen.includes(p.hash)) { ui.lastAuto = null; showLedgerFor(p.date); toast('이미 기록한 알림이에요'); return true; }
+  if (state.settings.smsSeen.includes(p.hash)) return { dup: true, msg: '이미 기록한 알림이에요' };
   const mine = !!state.settings.myName && normName(p.memo).includes(normName(state.settings.myName));
   const mate = findAutoMate(p, acc);
   let tx, msg;
@@ -2291,12 +2342,121 @@ function autoRecord(p) {
   const seen = state.settings.smsSeen;
   seen.push(p.hash); if (seen.length > 300) seen.splice(0, seen.length - 300);
   saveState();
-  ui.lastAuto = { id: tx.id, hash: p.hash, text: msg };
-  showLedgerFor(tx.date);
-  toast('📩 ' + msg);
-  return true;
+  return { tx, msg, hash: p.hash };
 }
-// 가계부 위에 뜨는 '방금 자동 기록' 배너 (고치기 · 지우기) / 읽지 못한 알림 배너
+// 바로 기록한 뒤: 그 달 가계부로 가서 배너(고치기·지우기) + 알림
+function afterAutoRecord(r) {
+  if (r.dup) { ui.lastAuto = null; render(); toast(r.msg); return; }
+  ui.lastAuto = { id: r.tx.id, hash: r.hash, text: r.msg };
+  showLedgerFor(r.tx.date);
+  toast('📩 ' + r.msg);
+}
+
+/* ---------------------------------------------------------
+   받은 알림함 (v1.6): 자동화 앱이 넘겨준 알림은 먼저 여기에 담아 두고,
+   확실한 것만 바로 기록해요. 나머지는 나중에 한 번에 처리해요.
+   (알림이 연달아 와도 앞의 알림이 사라지지 않아요)
+   --------------------------------------------------------- */
+const inboxPending = () => state.inbox.filter(x => x.status === 'pending');
+const inboxItem = id => state.inbox.find(x => x.id === id);
+// 알림 하나 도착: 담아 두기 → (설정이 켜져 있고 확실하면) 바로 기록
+function inboxArrive(app, text, log) {
+  const p = parseSms(text, { app });
+  const hash = p.ok ? p.hash : smsHash(app + text);
+  if (state.inbox.some(x => x.hash === hash)) { logIncoming(log, '이미 받은 알림'); render(); toast('이미 받은 알림이에요'); return; }
+  const item = { id: newId(), at: Date.now(), app, text, hash, status: 'pending', txId: '', note: p.ok ? '' : p.reason };
+  state.inbox.push(item);
+  if (state.inbox.length > 200) state.inbox.splice(0, state.inbox.length - 200);
+  if (p.ok && state.settings.smsAuto) {
+    const r = autoRecord(p);
+    if (r && !r.dup) {
+      item.status = 'done'; item.txId = r.tx.id; item.note = r.msg;
+      saveState(); logIncoming(log, '바로 기록: ' + r.msg); afterAutoRecord(r); return;
+    }
+    if (r && r.dup) { item.status = 'skipped'; item.note = '이미 기록한 알림'; saveState(); logIncoming(log, '이미 기록한 알림'); render(); toast(r.msg); return; }
+  }
+  saveState();
+  logIncoming(log, p.ok ? `알림함에 담음 (${p.kind === 'income' ? '수입' : '지출'} ${fmt(p.amount)}원)` : '알림함에 담음 (못 읽음: ' + p.reason + ')');
+  render();
+  toast(`📩 알림을 받아 두었어요 · 확인할 알림 ${inboxPending().length}건`);
+}
+// 알림함 항목 하나의 요약 (읽을 때마다 새로 읽어서 형식이 좋아지면 바로 반영)
+function inboxSummary(x) {
+  const p = parseSms(x.text, { app: x.app });
+  if (!p.ok) return { p, text: '못 읽음: ' + p.reason, sure: false };
+  const cands = smsMatchAccounts(p);
+  const acc = cands[0] ? cands[0].name + (cands.length > 1 ? ` 외 ${cands.length - 1}개` : '') : '계좌 모름';
+  return { p, sure: cands.length === 1, text: `${p.kind === 'income' ? '수입' : '지출'} ${won(p.amount)}${p.memo ? ' · ' + p.memo : ''} · ${acc}` };
+}
+function inboxItemRow(x) {
+  const sm = inboxSummary(x);
+  return `<li class="inbox-item" data-id="${esc(x.id)}">
+    <div class="ib-head"><b>${esc(x.app || '알림')}</b><span>${esc(stampLabel(x.at))}</span></div>
+    <div class="ib-sum${sm.p.ok ? '' : ' muted'}">${esc(sm.text)}</div>
+    <div class="ib-text">${esc(x.text.replace(/\s+/g, ' ').slice(0, 100))}</div>
+    <div class="btn-row"><button class="btn small primary" type="button" data-action="inbox-record" data-id="${esc(x.id)}">${sm.p.ok ? '기록' : '내용 보고 기록'}</button>
+      <button class="btn small" type="button" data-action="inbox-skip" data-id="${esc(x.id)}">건너뛰기</button></div>
+  </li>`;
+}
+function openInbox(opts = {}) {
+  const pending = inboxPending();
+  const sure = pending.filter(x => inboxSummary(x).sure).length;
+  const done = state.inbox.filter(x => x.status !== 'pending');
+  const html = `<div class="detail">
+    ${pending.length ? `<p class="desc">확인할 알림 <b>${pending.length}건</b>이에요. 하나씩 [기록]을 누르면 채워진 입력창이 열려요.</p>
+      ${sure ? `<div class="btn-col"><button class="btn primary block" type="button" data-action="inbox-record-all">확실한 알림 ${sure}건 한 번에 기록</button></div>` : ''}
+      <ul class="inbox" id="inbox-list">${pending.map(inboxItemRow).join('')}</ul>`
+      : '<section class="empty" id="inbox-empty"><div class="big" aria-hidden="true">📭</div><h2>확인할 알림이 없어요</h2><p>자동화 앱이 넘겨준 알림이 여기에 쌓여요.</p></section>'}
+    ${done.length ? `<details class="inbox-done" id="inbox-done"><summary>처리한 알림 ${done.length}건</summary>
+      <ul class="inbox small">${[...done].reverse().slice(0, 50).map(x => `<li class="inbox-item"><div class="ib-head"><b>${esc(x.app || '알림')}</b><span>${esc(stampLabel(x.at))}</span></div>
+        <div class="ib-sum muted">${esc(x.status === 'done' ? (x.note || '기록함') : '건너뜀' + (x.note ? ' · ' + x.note : ''))}</div></li>`).join('')}</ul>
+      <button class="btn small" type="button" data-action="inbox-clear-done">처리한 알림 비우기</button></details>` : ''}
+    <div class="sheet-end"></div>
+  </div>`;
+  openSheet('받은 알림함', html, null, opts);
+}
+// 알림함에서 [기록]: 읽은 내용으로 입력창 열기 (같은 창에서 바꿔 열기)
+function inboxRecord(id) {
+  const x = inboxItem(id);
+  if (!x) return;
+  const p = parseSms(x.text, { app: x.app });
+  if (!p.ok) { openSmsPaste(x.text, { replace: true, error: p.reason, inboxId: x.id, app: x.app }); return; }
+  openTxForm(null, { replace: true, preset: { ...smsToPreset(p), inboxId: x.id } });
+}
+// 알림함 항목 처리 끝 (기록함 / 건너뜀)
+function inboxFinish(id, status, txId = '', note = '') {
+  const x = inboxItem(id);
+  if (!x) return;
+  Object.assign(x, { status, txId, note });
+  saveState();
+}
+// 확실한 알림들 한 번에 기록 (온 순서대로 → 출금·입금 짝도 맞춰짐)
+function inboxRecordAll() {
+  let n = 0, last = null;
+  for (const x of inboxPending()) {
+    const p = parseSms(x.text, { app: x.app });
+    if (!p.ok) continue;
+    const r = autoRecord(p);
+    if (!r) continue;
+    if (r.dup) { Object.assign(x, { status: 'skipped', note: '이미 기록한 알림' }); continue; }
+    Object.assign(x, { status: 'done', txId: r.tx.id, note: r.msg }); n++; last = r;
+  }
+  saveState();
+  if (!n) { toast('바로 기록할 수 있는 알림이 없어요'); return; }
+  closeLayers(1);
+  ui.lastAuto = { id: last.tx.id, hash: last.hash, text: n > 1 ? `${n}건 기록했어요 · 마지막: ${last.msg}` : last.msg };
+  showLedgerFor(last.tx.date);
+  toast(`📩 알림 ${n}건을 기록했어요`);
+}
+// 홈·가계부 위 카드: 확인할 알림이 있으면
+function inboxBanner() {
+  const n = inboxPending().length;
+  if (!n) return '';
+  return `<section class="card notice install" id="inbox-banner"><div class="grow"><b>📩 확인할 알림 ${n}건</b>
+    <p>은행·카드 앱 알림을 받아 두었어요. 한 번에 처리하세요.</p></div>
+    <button class="btn primary small" type="button" data-action="inbox-open">처리하기</button></section>`;
+}
+// 가계부 위에 뜨는 '방금 자동 기록' 배너 (고치기 · 지우기) / 자동화 앱 설정 확인 배너
 function autoBanner() {
   const la = ui.lastAuto;
   if (!la) return '';
@@ -2305,16 +2465,38 @@ function autoBanner() {
       <p>${esc(la.reason)}</p></div>
       <button class="btn small" type="button" data-action="auto-dismiss">닫기</button></section>`;
   }
-  if (la.failed) {
-    return `<section class="card notice warn" id="auto-banner"><div class="grow"><b>📩 읽지 못한 알림이 있어요</b>
-      <p>${esc([la.app, la.reason].filter(Boolean).join(' · '))}</p></div>
-      <button class="btn small" type="button" data-action="auto-open-failed">보기</button></section>`;
-  }
   const t = state.txs.find(x => x.id === la.id);
   if (!t) return '';
   return `<section class="card notice install" id="auto-banner"><div class="grow"><b>📩 알림으로 자동 기록했어요</b><p>${esc(la.text)}</p></div>
     <div class="btn-stack"><button class="btn small" type="button" data-action="edit-tx" data-id="${esc(t.id)}">고치기</button>
     <button class="btn small danger-ghost" type="button" data-action="auto-undo" data-id="${esc(t.id)}">지우기</button></div></section>`;
+}
+
+/* ---------------------------------------------------------
+   작성 중이던 입력창 지키기 (v1.6): 알림이 와서 앱이 다시 열려도 쓰던 내용을 잃지 않게
+   --------------------------------------------------------- */
+const draftCtl = { on: false, timer: 0 };      // 입력창이 열려 있는 동안만 임시 저장 (닫은 뒤 blur로 생기는 change 이벤트는 무시)
+function saveDraft(d) { try { localStorage.setItem(DRAFT_KEY, JSON.stringify({ ...d, at: Date.now() })); } catch (e) { /* 무시 */ } }
+function clearDraft() {
+  draftCtl.on = false; clearTimeout(draftCtl.timer);
+  try { localStorage.removeItem(DRAFT_KEY); } catch (e) { /* 무시 */ }
+  ui.draft = null;
+}
+function loadDraft() {
+  try {
+    const d = JSON.parse(localStorage.getItem(DRAFT_KEY) || 'null');
+    if (!d || typeof d !== 'object' || Date.now() - (d.at || 0) > 2 * 3600 * 1000) return null;     // 2시간 지난 건 버림
+    if (!(parseAmount(d.amount) > 0) && !(d.memo || '').trim()) return null;                         // 아무것도 안 썼으면 없음
+    return d;
+  } catch (e) { return null; }
+}
+function draftBanner() {
+  const d = ui.draft;
+  if (!d) return '';
+  const what = `${d.kind === 'income' ? '수입' : d.kind === 'transfer' ? '이체' : '지출'}${parseAmount(d.amount) ? ' ' + fmt(parseAmount(d.amount)) + '원' : ''}${d.memo ? ' · ' + d.memo : ''}`;
+  return `<section class="card notice warn" id="draft-banner"><div class="grow"><b>✍️ 작성 중이던 기록이 있어요</b><p>${esc(what)} — 알림이 와서 창이 닫혔어요.</p></div>
+    <div class="btn-stack"><button class="btn small primary" type="button" data-action="draft-resume">이어서 쓰기</button>
+    <button class="btn small" type="button" data-action="draft-discard">버리기</button></div></section>`;
 }
 // 읽은 결과 미리보기 (붙여넣기 화면)
 function smsPreview(p) {
@@ -2350,7 +2532,7 @@ function openSmsPaste(text = '', opts = {}) {
     const ta = $('#sms-text', root), out = $('#sms-result', root), err = $('#sms-error', root), go = $('#sms-go', root);
     let parsed = null;
     const read = () => {
-      parsed = parseSms(ta.value);
+      parsed = parseSms(ta.value, { app: opts.app });
       if (parsed.ok) { out.innerHTML = smsPreview(parsed); err.textContent = ''; go.disabled = false; }
       else { out.innerHTML = ''; err.textContent = parsed.reason; go.disabled = true; }
     };
@@ -2363,7 +2545,7 @@ function openSmsPaste(text = '', opts = {}) {
       } catch (e) { toast('붙여넣기를 허용하지 않았어요. 입력칸을 길게 눌러 붙여넣어 주세요.'); ta.focus(); }
     });
     ta.addEventListener('input', () => { go.disabled = true; err.textContent = ''; });
-    go.addEventListener('click', () => { if (parsed && parsed.ok) openTxForm(null, { replace: true, preset: smsToPreset(parsed) }); });
+    go.addEventListener('click', () => { if (parsed && parsed.ok) openTxForm(null, { replace: true, preset: { ...smsToPreset(parsed), inboxId: opts.inboxId || '' } }); });
     if (ta.value.trim()) read();
     else setTimeout(() => ta.focus({ preventScroll: true }), 300);
   }, opts);
@@ -2391,11 +2573,13 @@ function receiveShared() {
   }
   if (problem) {
     logIncoming(entry, '빈 내용/그대로 옴');
-    ui.lastAuto = { failed: '', reason: problem, app: '', setup: true };
+    ui.lastAuto = { reason: problem, setup: true };
     render(); toast('자동화 앱 설정을 확인해 주세요');
     return;
   }
-  setTimeout(() => handleIncoming(text, { app, log: entry }), 60);
+  // 자동화 앱(알림·문자)에서 온 것은 알림함에 담고, 직접 공유한 것은 바로 입력창
+  const automated = keys.includes('app') || keys.includes('sms');
+  setTimeout(() => (automated ? inboxArrive(app, text, entry) : handleIncoming(text, { app, log: entry })), 60);
 }
 
 /* =========================================================
@@ -2492,18 +2676,21 @@ document.addEventListener('click', e => {
   const id = el.dataset.id;
   switch (el.dataset.action) {
     case 'tab': ui.lastAuto = null; setTab(el.dataset.tab); break;
-    case 'auto-undo': {                                       // 방금 자동 기록한 것 지우기 (같은 알림이 다시 오면 또 기록되게 표시도 지움)
+    case 'auto-undo': {                                       // 방금 자동 기록한 것 지우기 (같은 알림이 다시 오면 또 기록되게 표시·알림함 항목도 지움)
       state.txs = state.txs.filter(x => x.id !== id);
+      state.inbox = state.inbox.filter(x => x.txId !== id);
       if (ui.lastAuto && ui.lastAuto.hash) state.settings.smsSeen = state.settings.smsSeen.filter(h => h !== ui.lastAuto.hash);
       ui.lastAuto = null; saveState(); render(); toast('지웠어요');
       break;
     }
-    case 'auto-open-failed': {
-      const la = ui.lastAuto; ui.lastAuto = null; render();
-      if (la && la.failed) openSmsPaste(la.failed, { error: la.reason });
-      break;
-    }
     case 'auto-dismiss': ui.lastAuto = null; render(); break;
+    case 'inbox-open': openInbox(); break;
+    case 'inbox-record': inboxRecord(id); break;
+    case 'inbox-skip': inboxFinish(id, 'skipped'); openInbox({ replace: true }); toast('건너뛰었어요'); break;
+    case 'inbox-record-all': inboxRecordAll(); break;
+    case 'inbox-clear-done': state.inbox = state.inbox.filter(x => x.status === 'pending'); saveState(); openInbox({ replace: true }); break;
+    case 'draft-resume': { const d = ui.draft; clearDraft(); render(); if (d) openTxForm(d.id || null, { draft: d }); break; }
+    case 'draft-discard': clearDraft(); render(); toast('작성 중이던 기록을 버렸어요'); break;
     case 'copy-inlog': {
       const txt = state.settings.inLog.map(e => `${stampLabel(e.at)} · ${e.result}\n${e.q}`).join('\n\n');
       navigator.clipboard.writeText(txt).then(() => toast('기록을 복사했어요'), () => toast('복사하지 못했어요'));
@@ -2597,7 +2784,9 @@ const ui = {
   ledgerMode: 'month',                 // 가계부: 'month'(월별 내역) | 'period'(기간 통계)
   period: presetRange('this'),         // 기간 통계에서 고른 기간
   lastAuto: null,                      // 방금 알림으로 자동 기록한 것 (가계부 위 배너: 고치기·지우기)
+  draft: null,                         // 알림 도착으로 닫혀 버린, 작성 중이던 입력창 내용
 };
+ui.draft = loadDraft();
 if (history.state && history.state.myassetLayer) history.replaceState(null, '', location.href);
 render();
 requestPersist();
