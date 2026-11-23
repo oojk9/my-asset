@@ -456,6 +456,8 @@ select.input {
 .catrow { display: block; width: 100%; padding: 8px 0; border: 0; border-radius: 8px; background: none; text-align: left; }
 .catrow:active { background: var(--card-2); }
 .catrow .cb-track { display: block; }
+.cb-more { color: var(--muted); font-size: 18px; line-height: 1; margin-left: 2px; }
+#month-cats-hint { margin-top: 10px; }
 .empty-li { padding: 6px 0; font-size: 14px; color: var(--muted); }
 .cat-total { display: flex; justify-content: space-between; gap: 12px; margin-top: 8px; padding-top: 10px; border-top: 1px solid var(--line); font-weight: 700; font-variant-numeric: tabular-nums; }
 .mtable-wrap { overflow-x: auto; }
@@ -582,7 +584,7 @@ textarea.input { min-height: 132px; resize: vertical; line-height: 1.45; font-si
 /* =========================================================
    0) 앱 정보 · 분류 목록  ← 분류 이름을 바꾸고 싶으면 여기를 고치세요
    ========================================================= */
-const APP_VERSION = '1.6.1';
+const APP_VERSION = '1.6.2';
 const DATA_VERSION = 6;                 // 데이터 구조 버전 (2: 이체, 3: 신용카드, 4: 문자 식별 단어·문자 기록 이력, 5: 자동 기록 표시·바로 기록 설정·내 이름, 6: 받은 알림함)
 const STORAGE_KEY = 'myasset.v1';       // 휴대폰에 저장할 때 쓰는 이름 (기존 데이터를 그대로 읽도록 유지)
 const DRAFT_KEY = STORAGE_KEY + '.draft';   // 작성 중이던 가계부 입력창 (알림 도착으로 앱이 다시 열려도 잃지 않게)
@@ -1427,13 +1429,16 @@ function viewLedger() {
   const rows = Object.entries(byCat).sort((a, b) => b[1] - a[1]);
   if (rows.length) {
     const max = rows[0][1];
-    h += `<section class="card"><div class="card-head"><h2>분류별 지출</h2><button class="link" type="button" data-action="period-from-month">기간 통계 ›</button></div>
+    // 분류를 누르면 그 달 그 분류의 기록만 모아서 보여줌 (v1.6.2)
+    h += `<section class="card" id="month-cats"><div class="card-head"><h2>분류별 지출</h2><button class="link" type="button" data-action="period-from-month">기간 통계 ›</button></div>
       <ul class="catbars">${rows.map(([id, v]) => {
         const c = CAT[id] || { label: '기타', icon: '📌' };
-        return `<li><div class="cb-top"><span class="cb-name"><span aria-hidden="true">${c.icon}</span> ${esc(c.label)}</span>
-          <span class="cb-pct">${(v / M.expense * 100).toFixed(1)}%</span><span class="cb-val">${won(v)}</span></div>
-          <div class="cb-track" aria-hidden="true"><span class="cb-bar" style="width:${(v / max * 100).toFixed(2)}%"></span></div></li>`;
-      }).join('')}</ul></section>`;
+        return `<li><button class="catrow" type="button" data-action="cat-month" data-id="${esc(id)}" aria-label="${esc(c.label)} ${esc(won(v))} · 내역 보기">
+          <span class="cb-top"><span class="cb-name"><span aria-hidden="true">${c.icon}</span> ${esc(c.label)}</span>
+            <span class="cb-pct">${(v / M.expense * 100).toFixed(1)}%</span><span class="cb-val">${won(v)}</span><span class="cb-more" aria-hidden="true">›</span></span>
+          <span class="cb-track" aria-hidden="true"><span class="cb-bar" style="width:${(v / max * 100).toFixed(2)}%"></span></span>
+        </button></li>`;
+      }).join('')}</ul><p class="hint" id="month-cats-hint">분류를 누르면 그 달의 내역을 볼 수 있어요.</p></section>`;
   }
 
   if (!M.list.length) {
@@ -1546,9 +1551,9 @@ function viewPeriod() {
   }
   return h;
 }
-// 분류 하나를 누르면: 기간 합계 · 월별 · 기록 목록
-function openCatStats(kind, cat) {
-  const { start, end } = ui.period;
+// 분류 하나를 누르면: 기간 합계 · 월별 · 기록 목록 (range를 주면 그 기간만 — 월별 내역에서는 보고 있던 달)
+function openCatStats(kind, cat, range) {
+  const { start, end } = range || ui.period;
   const months = monthsBetween(start, end);
   const from = start + '-01', to = end + '-31';
   const list = state.txs.filter(t => t.kind === kind && t.category === cat && t.date >= from && t.date <= to).sort(newestFirst);
@@ -1567,7 +1572,7 @@ function openCatStats(kind, cat) {
     <ul class="catbars" id="cat-detail-months">${months.map(m => `<li><div class="cb-top"><span class="cb-name">${esc(shortMonth(m, multiYear))}</span><span class="cb-val">${won(byM[m])}</span></div>
       <div class="cb-track" aria-hidden="true">${byM[m] ? `<span class="cb-bar" style="width:${(byM[m] / max * 100).toFixed(2)}%"></span>` : ''}</div></li>`).join('')}</ul>` : ''}
     <h3 class="sheet-section">기록 ${list.length}건 <span class="opt">· 누르면 고칠 수 있어요</span></h3>
-    <ul class="list flush" id="cat-detail-list">${shown.map(t => txRow(t, true, true)).join('')}</ul>
+    <ul class="list flush" id="cat-detail-list">${shown.length ? shown.map(t => txRow(t, true, true)).join('') : '<li class="empty-li">이 기간에 기록이 없어요.</li>'}</ul>
     ${list.length > shown.length ? `<p class="hint center">최근 ${shown.length}건만 보여요</p>` : ''}
     <div class="sheet-end"></div>
   </div>`;
@@ -2782,6 +2787,7 @@ document.addEventListener('click', e => {
     case 'period-from-month': ui.period = { start: ui.month, end: ui.month, preset: ui.month === thisMonth() ? 'this' : '' }; ui.ledgerMode = 'period'; render(); window.scrollTo(0, 0); break;
     case 'period-preset': ui.period = presetRange(id); render(); break;
     case 'cat-stats': openCatStats(el.dataset.kind, id); break;
+    case 'cat-month': openCatStats('expense', id, { start: ui.month, end: ui.month }); break;
     case 'month-prev': ui.month = shiftMonth(ui.month, -1); render(); break;
     case 'month-next': ui.month = shiftMonth(ui.month, 1); render(); break;
     case 'month-now': ui.month = thisMonth(); render(); break;
